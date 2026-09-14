@@ -1,0 +1,15 @@
+# Third-party sources — fetched by CMake (see KEK_FETCH_DEPS in CMakeLists.txt)
+/ext
+
+# Build output
+/build
+/out
+compile_commands.json
+
+# IDE / tooling
+/.vs
+/.cache
+CMakeSettings.json
+
+# Python
+__pycache__

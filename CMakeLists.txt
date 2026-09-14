@@ -1,11 +1,46 @@
-cmake_minimum_required(VERSION 3.10.0)
+cmake_minimum_required(VERSION 3.20)
 
 # Project settings
 set(GAME_NAME "SnusShooter")
-set(USE_SDL3_SOURCE OFF)
 
 project(${GAME_NAME} VERSION 0.1.0 LANGUAGES C CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Dependencies are fetched by CMake so a fresh clone builds without setup.
+# Turn this OFF to use local copies under ext/ instead (see KEK_SDL3_LOCAL_DIR
+# and KEK_IMGUI_LOCAL_DIR below).
+option(KEK_FETCH_DEPS "Fetch SDL3 and Dear ImGui with FetchContent" ON)
+set(KEK_SDL3_LOCAL_DIR "${CMAKE_SOURCE_DIR}/ext/SDL3-3.4.2"
+    CACHE PATH "Prebuilt SDL3 used when KEK_FETCH_DEPS=OFF")
+set(KEK_IMGUI_LOCAL_DIR "${CMAKE_SOURCE_DIR}/ext/imgui-1.92.6-docking"
+    CACHE PATH "Dear ImGui sources used when KEK_FETCH_DEPS=OFF")
+
+set(KEK_SDL3_TAG "release-3.4.2" CACHE STRING "SDL3 git tag to fetch")
+set(KEK_IMGUI_TAG "v1.92.6-docking" CACHE STRING "Dear ImGui git tag to fetch")
+
+if(KEK_FETCH_DEPS)
+  include(FetchContent)
+
+  FetchContent_Declare(SDL3
+    GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+    GIT_TAG        ${KEK_SDL3_TAG}
+    GIT_SHALLOW    TRUE
+  )
+  FetchContent_Declare(imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG        ${KEK_IMGUI_TAG}
+    GIT_SHALLOW    TRUE
+  )
+
+  # Dear ImGui ships no CMakeLists; FetchContent_MakeAvailable only downloads it
+  # and the imgui target below is built from ${imgui_SOURCE_DIR}.
+  FetchContent_MakeAvailable(SDL3 imgui)
+  set(KEK_IMGUI_DIR "${imgui_SOURCE_DIR}")
+else()
+  list(APPEND CMAKE_PREFIX_PATH "${KEK_SDL3_LOCAL_DIR}")
+  find_package(SDL3 REQUIRED)
+  set(KEK_IMGUI_DIR "${KEK_IMGUI_LOCAL_DIR}")
+endif()
 
 set(KEK_MODEL_POOL_CAPACITY 16 CACHE STRING "Max pooled models")
 set(KEK_TEXTURE_POOL_CAPACITY 16 CACHE STRING "Max pooled textures")
@@ -27,7 +62,7 @@ set(
 )
 
 ######## KEK engine ########
-add_library(kek
+add_library(kek 
   kek/include/kek_asset.h
   kek/include/kek_keyboard.h
   kek/include/kek_macro.h
@@ -56,7 +91,7 @@ add_library(kek
   kek/kek_file_model.c
   kek/kek.c
 )
-set_target_properties(kek PROPERTIES
+set_target_properties(kek PROPERTIES 
   C_STANDARD 99
   C_STANDARD_REQUIRED ON
   C_EXTENSIONS OFF
@@ -86,7 +121,7 @@ add_library(${GAME_NAME}
   game/game_scene_loader.c
   game/game.c
 )
-set_target_properties(${GAME_NAME} PROPERTIES
+set_target_properties(${GAME_NAME} PROPERTIES 
   C_STANDARD 99
   C_STANDARD_REQUIRED ON
   C_EXTENSIONS OFF
@@ -98,51 +133,45 @@ target_link_libraries(${GAME_NAME} PRIVATE kek)
 
 
 ######## Platform implementations ########
-# Win32 executable
-if(USE_SDL3_SOURCE)
-  add_subdirectory(ext/SDL-release-3.4.2 EXCLUDE_FROM_ALL)
-else()
-  list(APPEND CMAKE_PREFIX_PATH ext/SDL3-3.4.2)
-  find_package(SDL3 REQUIRED)
-endif()
-add_executable(${GAME_NAME}_win32
-  platform/main_win32.c
-  platform/platform_assets_fs.h
-  platform/platform_assets_fs.c
-)
-set_target_properties(${GAME_NAME}_win32 PROPERTIES
-  C_STANDARD 11 # Required by SDL3
-  C_STANDARD_REQUIRED ON
-  C_EXTENSIONS OFF
-)
-target_link_libraries(${GAME_NAME}_win32 PRIVATE kek ${GAME_NAME} SDL3::SDL3)
+# Win32 executable — the only platform layer implemented so far.
+if(WIN32)
+  add_executable(${GAME_NAME}_win32
+    platform/main_win32.c
+    platform/platform_assets_fs.h
+    platform/platform_assets_fs.c
+  )
+  set_target_properties(${GAME_NAME}_win32 PROPERTIES
+    C_STANDARD 11 # Required by SDL3
+    C_STANDARD_REQUIRED ON
+    C_EXTENSIONS OFF
+  )
+  target_link_libraries(${GAME_NAME}_win32 PRIVATE kek ${GAME_NAME} SDL3::SDL3)
 
-if(NOT USE_SDL3_SOURCE)
   add_custom_command(
     TARGET ${GAME_NAME}_win32 POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:SDL3::SDL3>" "$<TARGET_FILE_DIR:${GAME_NAME}_win32>"
     VERBATIM
-)
-endif()
+  )
 
-add_custom_command(
-  TARGET ${GAME_NAME}_win32 POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E remove_directory
-          "$<TARGET_FILE_DIR:${GAME_NAME}_win32>/assets"
-  COMMAND ${CMAKE_COMMAND} -E copy_directory
-          "${CMAKE_SOURCE_DIR}/assets"
-          "$<TARGET_FILE_DIR:${GAME_NAME}_win32>/assets"
-  COMMENT "Replacing assets directory next to ${GAME_NAME}_win32"
-)
+  add_custom_command(
+    TARGET ${GAME_NAME}_win32 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E remove_directory
+            "$<TARGET_FILE_DIR:${GAME_NAME}_win32>/assets"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets"
+            "$<TARGET_FILE_DIR:${GAME_NAME}_win32>/assets"
+    COMMENT "Replacing assets directory next to ${GAME_NAME}_win32"
+  )
+endif()
 
 ######## ImGui ########
 add_library(imgui
-  ext/imgui-1.92.6-docking/imgui.cpp
-  ext/imgui-1.92.6-docking/imgui_draw.cpp
-  ext/imgui-1.92.6-docking/imgui_tables.cpp
-  ext/imgui-1.92.6-docking/imgui_widgets.cpp
-  ext/imgui-1.92.6-docking/backends/imgui_impl_sdl3.cpp
-  ext/imgui-1.92.6-docking/backends/imgui_impl_sdlrenderer3.cpp
+  ${KEK_IMGUI_DIR}/imgui.cpp
+  ${KEK_IMGUI_DIR}/imgui_draw.cpp
+  ${KEK_IMGUI_DIR}/imgui_tables.cpp
+  ${KEK_IMGUI_DIR}/imgui_widgets.cpp
+  ${KEK_IMGUI_DIR}/backends/imgui_impl_sdl3.cpp
+  ${KEK_IMGUI_DIR}/backends/imgui_impl_sdlrenderer3.cpp
 )
 set_target_properties(imgui PROPERTIES
   CXX_STANDARD 20
@@ -150,8 +179,8 @@ set_target_properties(imgui PROPERTIES
   CXX_EXTENSIONS OFF
 )
 target_include_directories(imgui PUBLIC
-  ext/imgui-1.92.6-docking
-  ext/imgui-1.92.6-docking/backends
+  ${KEK_IMGUI_DIR}
+  ${KEK_IMGUI_DIR}/backends
 )
 target_link_libraries(imgui PUBLIC SDL3::SDL3)
 
@@ -166,7 +195,7 @@ set_target_properties(kek_editor PROPERTIES
 )
 target_link_libraries(kek_editor PRIVATE kek SDL3::SDL3 imgui)
 
-if(NOT USE_SDL3_SOURCE)
+if(WIN32)
   add_custom_command(
     TARGET kek_editor POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:SDL3::SDL3>" "$<TARGET_FILE_DIR:kek_editor>"

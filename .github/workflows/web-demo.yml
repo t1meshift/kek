@@ -20,16 +20,17 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Carries emcc, cmake, ninja and git, so there is no toolchain setup step.
+    # Carries emcc, cmake, make and git, so there is no toolchain setup step.
+    # It has no Ninja, hence the default Makefiles generator below.
     container: emscripten/emsdk:latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Configure
-        run: emcmake cmake -B build-web -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: emcmake cmake -B build-web -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: cmake --build build-web
+        run: cmake --build build-web --parallel $(nproc)
 
       - uses: actions/upload-pages-artifact@v3
         with:

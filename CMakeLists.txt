@@ -6,10 +6,11 @@ set(GAME_NAME "SnusShooter")
 project(${GAME_NAME} VERSION 0.1.0 LANGUAGES C CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Dependencies are fetched by CMake so a fresh clone builds without setup.
+# Dependencies are resolved by CMake so a fresh clone builds without setup:
+# a system-wide SDL3 is used when present, anything missing is fetched.
 # Turn this OFF to use local copies under ext/ instead (see KEK_SDL3_LOCAL_DIR
 # and KEK_IMGUI_LOCAL_DIR below).
-option(KEK_FETCH_DEPS "Fetch SDL3 and Dear ImGui with FetchContent" ON)
+option(KEK_FETCH_DEPS "Resolve SDL3 and Dear ImGui automatically (system package or FetchContent)" ON)
 set(KEK_SDL3_LOCAL_DIR "${CMAKE_SOURCE_DIR}/ext/SDL3-3.4.2"
     CACHE PATH "Prebuilt SDL3 used when KEK_FETCH_DEPS=OFF")
 set(KEK_IMGUI_LOCAL_DIR "${CMAKE_SOURCE_DIR}/ext/imgui-1.92.6-docking"
@@ -21,11 +22,18 @@ set(KEK_IMGUI_TAG "v1.92.6-docking" CACHE STRING "Dear ImGui git tag to fetch")
 if(KEK_FETCH_DEPS)
   include(FetchContent)
 
-  FetchContent_Declare(SDL3
-    GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-    GIT_TAG        ${KEK_SDL3_TAG}
-    GIT_SHALLOW    TRUE
-  )
+  # An SDL3 installed system-wide is just as good and saves building it from
+  # source; fall back to fetching only when there is none.
+  find_package(SDL3 QUIET)
+  if(NOT SDL3_FOUND)
+    FetchContent_Declare(SDL3
+      GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+      GIT_TAG        ${KEK_SDL3_TAG}
+      GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(SDL3)
+  endif()
+
   FetchContent_Declare(imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
     GIT_TAG        ${KEK_IMGUI_TAG}
@@ -34,7 +42,7 @@ if(KEK_FETCH_DEPS)
 
   # Dear ImGui ships no CMakeLists; FetchContent_MakeAvailable only downloads it
   # and the imgui target below is built from ${imgui_SOURCE_DIR}.
-  FetchContent_MakeAvailable(SDL3 imgui)
+  FetchContent_MakeAvailable(imgui)
   set(KEK_IMGUI_DIR "${imgui_SOURCE_DIR}")
 else()
   list(APPEND CMAKE_PREFIX_PATH "${KEK_SDL3_LOCAL_DIR}")
@@ -50,6 +58,14 @@ set(KEK_POOL_MODEL_COLORS_MAX 1024 CACHE STRING "Max face colors per pooled mode
 set(KEK_POOL_MODEL_UVS_MAX 1024 CACHE STRING "Max textured faces per pooled model")
 set(KEK_POOL_TEXTURE_PIXELS_MAX 65536 CACHE STRING "Max pixels per pooled texture")
 set(KEK_PALETTE_SHADING_LEVELS 4 CACHE STRING "Max shading levels")
+
+# The output directories below are per-configuration, and with a single-config
+# generator (Ninja, Make) $<CONFIG> is empty unless a build type is set — which
+# would drop the binaries straight into ${CMAKE_BINARY_DIR}.
+get_property(KEK_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(NOT KEK_MULTI_CONFIG AND NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Build type" FORCE)
+endif()
 
 set(
   CMAKE_RUNTIME_OUTPUT_DIRECTORY
@@ -109,6 +125,11 @@ target_compile_definitions(kek PUBLIC
   KEK_POOL_TEXTURE_PIXELS_MAX=${KEK_POOL_TEXTURE_PIXELS_MAX}
   KEK_PALETTE_SHADING_LEVELS=${KEK_PALETTE_SHADING_LEVELS}
 )
+if(UNIX)
+  # sqrtf/sinf/cosf/tanf/floorf/roundf/fabsf. Recent glibc folds libm into libc,
+  # but older ones and musl still need the explicit link.
+  target_link_libraries(kek PUBLIC m)
+endif()
 
 
 ######## The game ########
@@ -133,36 +154,38 @@ target_link_libraries(${GAME_NAME} PRIVATE kek)
 
 
 ######## Platform implementations ########
-# Win32 executable — the only platform layer implemented so far.
-if(WIN32)
-  add_executable(${GAME_NAME}_win32
-    platform/main_win32.c
-    platform/platform_assets_fs.h
-    platform/platform_assets_fs.c
-  )
-  set_target_properties(${GAME_NAME}_win32 PROPERTIES
-    C_STANDARD 11 # Required by SDL3
-    C_STANDARD_REQUIRED ON
-    C_EXTENSIONS OFF
-  )
-  target_link_libraries(${GAME_NAME}_win32 PRIVATE kek ${GAME_NAME} SDL3::SDL3)
+# SDL3 executable — platform-agnostic, the only platform layer implemented so far.
+add_executable(${GAME_NAME}_sdl
+  platform/main_sdl.c
+  platform/platform_assets_fs.h
+  platform/platform_assets_fs.c
+)
+set_target_properties(${GAME_NAME}_sdl PROPERTIES
+  C_STANDARD 11 # Required by SDL3
+  C_STANDARD_REQUIRED ON
+  C_EXTENSIONS OFF
+)
+target_link_libraries(${GAME_NAME}_sdl PRIVATE kek ${GAME_NAME} SDL3::SDL3)
 
+if(WIN32)
   add_custom_command(
-    TARGET ${GAME_NAME}_win32 POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:SDL3::SDL3>" "$<TARGET_FILE_DIR:${GAME_NAME}_win32>"
+    TARGET ${GAME_NAME}_sdl POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:SDL3::SDL3>" "$<TARGET_FILE_DIR:${GAME_NAME}_sdl>"
     VERBATIM
   )
-
-  add_custom_command(
-    TARGET ${GAME_NAME}_win32 POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E remove_directory
-            "$<TARGET_FILE_DIR:${GAME_NAME}_win32>/assets"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_SOURCE_DIR}/assets"
-            "$<TARGET_FILE_DIR:${GAME_NAME}_win32>/assets"
-    COMMENT "Replacing assets directory next to ${GAME_NAME}_win32"
-  )
 endif()
+
+# The game resolves assets against the working directory (see "./assets/" in
+# platform/main_sdl.c), so they have to sit next to the executable.
+add_custom_command(
+  TARGET ${GAME_NAME}_sdl POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E remove_directory
+          "$<TARGET_FILE_DIR:${GAME_NAME}_sdl>/assets"
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          "${CMAKE_SOURCE_DIR}/assets"
+          "$<TARGET_FILE_DIR:${GAME_NAME}_sdl>/assets"
+  COMMENT "Replacing assets directory next to ${GAME_NAME}_sdl"
+)
 
 ######## ImGui ########
 add_library(imgui

@@ -8,21 +8,35 @@
             "name": "(Windows) Launch",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceRoot}/build/Debug/kek_win32.exe",
+            "program": "${workspaceRoot}/build/Debug/SnusShooter_sdl.exe",
             "args": [],
             "stopAtEntry": false,
-            "cwd": "${fileDirname}",
+            // The game resolves assets against the working directory.
+            "cwd": "${workspaceRoot}/build/Debug",
             "environment": [],
             "console": "externalTerminal"
         },
         {
-            "type": "lldb-mi",
+            "name": "(Linux) Launch",
+            "type": "cppdbg",
             "request": "launch",
-            "name": "Launch Program",
-            "target": "./build/Debug/kek_win32.exe",
-            "cwd": "${workspaceRoot}",
-            "valuesFormatting": "parseText"
+            "program": "${workspaceRoot}/build/Debug/SnusShooter_sdl",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceRoot}/build/Debug",
+            "environment": [],
+            "MIMode": "gdb"
+        },
+        {
+            "name": "(Linux) Launch editor",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceRoot}/build/Debug/kek_editor",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceRoot}/build/Debug",
+            "environment": [],
+            "MIMode": "gdb"
         }
-
     ]
 }

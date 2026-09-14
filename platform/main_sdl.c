@@ -1,10 +1,11 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_events.h>
-#include <SDL3/SDL_oldnames.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include "platform_assets_fs.h"
 #include <kek.h>
+#include <kek_macro.h>
 #include <game.h>
 
 int main(int argc, char* argv[]) {
@@ -67,7 +68,7 @@ int main(int argc, char* argv[]) {
 
         uint64_t ticks = SDL_GetTicks();
         int dt = ticks - last_ticks;
-        int delay_time = max(1000/e.target_fps - dt, 0);
+        int delay_time = KEK_MAX(1000/e.target_fps - dt, 0);
         kek_update(&e);
 
         kek_render(&e);

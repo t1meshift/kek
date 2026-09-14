@@ -6,7 +6,7 @@
 			"label": "CMake: clean rebuild",
 			"command": "cleanRebuild",
 			"targets": [
-				"SnusShooter_win32"
+				"SnusShooter_sdl"
 			],
 			"group": "build",
 			"problemMatcher": [],

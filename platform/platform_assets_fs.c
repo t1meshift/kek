@@ -62,6 +62,15 @@ static int _fs_asset_build_path(char* dst, size_t dst_size, const char* root_pat
     return 1;
 }
 
+static FILE* _fs_asset_fopen_rb(const char* path) {
+#if defined(_MSC_VER)
+    FILE* file = NULL;
+    return fopen_s(&file, path, "rb") == 0 ? file : NULL;
+#else
+    return fopen(path, "rb");
+#endif
+}
+
 static int _fs_asset_query_size(FILE* file, size_t* out_size) {
     long file_size;
 
@@ -96,8 +105,8 @@ static int _fs_asset_stat(KEK_AssetProvider* provider, const char* path, KEK_Ass
         return 0;
     }
 
-    int err = fopen_s(&file, full_path, "rb");
-    if (err != 0) {
+    file = _fs_asset_fopen_rb(full_path);
+    if (!file) {
         return 0;
     }
 
@@ -128,8 +137,8 @@ static int _fs_asset_open(KEK_AssetProvider* provider, const char* path, KEK_Ass
         return 0;
     }
 
-    int err = fopen_s(&file, full_path, "rb");
-    if (err != 0) {
+    file = _fs_asset_fopen_rb(full_path);
+    if (!file) {
         return 0;
     }
 

@@ -1,5 +1,7 @@
 # KEK engine
 
+## [Live Demo](https://t1meshift.github.io/kek/)
+
 ## Overview
 KEK is a 2D/3D software renderer/engine written in pure C99 with no dynamic allocations. It draws into a 320×200 framebuffer with a 256-color palette and targets 30 FPS. The goal is to run on as many platforms as possible with almost non-existent CPU and memory requirements.
 

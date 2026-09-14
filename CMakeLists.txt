@@ -23,9 +23,24 @@ if(KEK_FETCH_DEPS)
   include(FetchContent)
 
   # An SDL3 installed system-wide is just as good and saves building it from
-  # source; fall back to fetching only when there is none.
-  find_package(SDL3 QUIET)
+  # source; fall back to fetching only when there is none. A host SDL3 is no use
+  # to Emscripten, so that build always goes through the source fetch.
+  if(NOT EMSCRIPTEN)
+    find_package(SDL3 QUIET)
+  endif()
   if(NOT SDL3_FOUND)
+    if(EMSCRIPTEN)
+      # The page needs video and keyboard and nothing else; every other
+      # subsystem is dead weight in the wasm.
+      set(SDL_AUDIO OFF CACHE BOOL "" FORCE)
+      set(SDL_CAMERA OFF CACHE BOOL "" FORCE)
+      set(SDL_DIALOG OFF CACHE BOOL "" FORCE)
+      set(SDL_HAPTIC OFF CACHE BOOL "" FORCE)
+      set(SDL_JOYSTICK OFF CACHE BOOL "" FORCE)
+      set(SDL_POWER OFF CACHE BOOL "" FORCE)
+      set(SDL_SENSOR OFF CACHE BOOL "" FORCE)
+    endif()
+
     FetchContent_Declare(SDL3
       GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
       GIT_TAG        ${KEK_SDL3_TAG}
@@ -34,16 +49,20 @@ if(KEK_FETCH_DEPS)
     FetchContent_MakeAvailable(SDL3)
   endif()
 
-  FetchContent_Declare(imgui
-    GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG        ${KEK_IMGUI_TAG}
-    GIT_SHALLOW    TRUE
-  )
+  # Only the editor needs Dear ImGui, and the editor is not part of a browser
+  # build (see the kek_editor section).
+  if(NOT EMSCRIPTEN)
+    FetchContent_Declare(imgui
+      GIT_REPOSITORY https://github.com/ocornut/imgui.git
+      GIT_TAG        ${KEK_IMGUI_TAG}
+      GIT_SHALLOW    TRUE
+    )
 
-  # Dear ImGui ships no CMakeLists; FetchContent_MakeAvailable only downloads it
-  # and the imgui target below is built from ${imgui_SOURCE_DIR}.
-  FetchContent_MakeAvailable(imgui)
-  set(KEK_IMGUI_DIR "${imgui_SOURCE_DIR}")
+    # Dear ImGui ships no CMakeLists; FetchContent_MakeAvailable only downloads it
+    # and the imgui target below is built from ${imgui_SOURCE_DIR}.
+    FetchContent_MakeAvailable(imgui)
+    set(KEK_IMGUI_DIR "${imgui_SOURCE_DIR}")
+  endif()
 else()
   list(APPEND CMAKE_PREFIX_PATH "${KEK_SDL3_LOCAL_DIR}")
   find_package(SDL3 REQUIRED)
@@ -175,17 +194,48 @@ if(WIN32)
   )
 endif()
 
-# The game resolves assets against the working directory (see "./assets/" in
-# platform/main_sdl.c), so they have to sit next to the executable.
-add_custom_command(
-  TARGET ${GAME_NAME}_sdl POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E remove_directory
-          "$<TARGET_FILE_DIR:${GAME_NAME}_sdl>/assets"
-  COMMAND ${CMAKE_COMMAND} -E copy_directory
-          "${CMAKE_SOURCE_DIR}/assets"
-          "$<TARGET_FILE_DIR:${GAME_NAME}_sdl>/assets"
-  COMMENT "Replacing assets directory next to ${GAME_NAME}_sdl"
-)
+if(EMSCRIPTEN)
+  # The browser build is one self-contained page: index.html + .js + .wasm, with
+  # the assets baked into the module. Nothing is fetched at runtime and
+  # platform_assets_fs.c keeps working unchanged — MEMFS mounts the embedded
+  # files at /assets and the working directory is /, so "./assets/" resolves.
+  set(KEK_WEB_SHELL "${CMAKE_SOURCE_DIR}/platform/web/shell.html")
+  file(GLOB_RECURSE KEK_WEB_ASSET_FILES "${CMAKE_SOURCE_DIR}/assets/*")
+
+  set_target_properties(${GAME_NAME}_sdl PROPERTIES
+    OUTPUT_NAME "index"
+    SUFFIX ".html"
+    LINK_DEPENDS "${KEK_WEB_SHELL};${KEK_WEB_ASSET_FILES}"
+  )
+  target_link_options(${GAME_NAME}_sdl PRIVATE
+    "--embed-file" "${CMAKE_SOURCE_DIR}/assets@/assets"
+    "--shell-file" "${KEK_WEB_SHELL}"
+    # kek_file_model_load() keeps a whole KMF's worth of vertices, normals, UVs
+    # and faces in locals — well past Emscripten's 64 KB default stack.
+    "-sSTACK_SIZE=1048576"
+    # No allocation past startup, so the heap can be fixed instead of growable.
+    "-sINITIAL_MEMORY=33554432"
+    "-sALLOW_MEMORY_GROWTH=0"
+    # SDL_AppIterate returns every frame, so the runtime has to stay alive.
+    "-sEXIT_RUNTIME=0"
+  )
+else()
+  # The game resolves assets against the working directory (see "./assets/" in
+  # platform/main_sdl.c), so they have to sit next to the executable.
+  add_custom_command(
+    TARGET ${GAME_NAME}_sdl POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E remove_directory
+            "$<TARGET_FILE_DIR:${GAME_NAME}_sdl>/assets"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets"
+            "$<TARGET_FILE_DIR:${GAME_NAME}_sdl>/assets"
+    COMMENT "Replacing assets directory next to ${GAME_NAME}_sdl"
+  )
+endif()
+
+# The editor is a desktop tool; a browser build has no use for it and Dear ImGui
+# would only be dead weight in the page.
+if(NOT EMSCRIPTEN)
 
 ######## ImGui ########
 add_library(imgui
@@ -225,6 +275,8 @@ if(WIN32)
     VERBATIM
   )
 endif()
+
+endif() # NOT EMSCRIPTEN
 
 # if(APPLE)
 #   set_target_properties(MyGame PROPERTIES

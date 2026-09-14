@@ -1,0 +1,48 @@
+name: Web demo
+
+# Builds the Emscripten target and publishes it to GitHub Pages. Pages has to be
+# switched to the "GitHub Actions" source once in the repository settings.
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; a newer push supersedes an in-flight one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Carries emcc, cmake, ninja and git, so there is no toolchain setup step.
+    container: emscripten/emsdk:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: emcmake cmake -B build-web -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build-web
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          # index.html, index.js and index.wasm — the assets are baked into the
+          # module, so this is the whole site.
+          path: build-web/Release
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

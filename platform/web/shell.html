@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KEK — SnusShooter</title>
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #101010;
+    color: #b4b4b4;
+    font: 13px/1.5 ui-monospace, "DejaVu Sans Mono", monospace;
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 16px;
+    box-sizing: border-box;
+  }
+
+  /* The renderer presents 320x200 upscaled to 1280x800; CSS only fits that
+     8:5 image into the viewport, and nearest-neighbour keeps the pixels hard. */
+  #canvas {
+    width: min(100%, calc((100vh - 80px) * 1.6));
+    aspect-ratio: 8 / 5;
+    display: block;
+    background: #000;
+    outline: none;
+    image-rendering: pixelated;
+  }
+
+  #status {
+    min-height: 1.5em;
+    text-align: center;
+  }
+
+  a { color: #b4b4b4; }
+</style>
+</head>
+<body>
+
+<canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
+<div id="status">Loading…</div>
+
+<script>
+  var statusElement = document.getElementById('status');
+  var canvasElement = document.getElementById('canvas');
+
+  var Module = {
+    canvas: canvasElement,
+    print: function (text) { console.log(text); },
+    printErr: function (text) { console.error(text); },
+    setStatus: function (text) {
+      // Emscripten reports download/startup progress here and clears it with an
+      // empty string once main() is running.
+      statusElement.textContent = text || 'Click the canvas, then use the keyboard.';
+    },
+    onRuntimeInitialized: function () { canvasElement.focus(); }
+  };
+
+  Module.setStatus('Loading…');
+  window.onerror = function () { Module.setStatus('Something broke — see the console.'); };
+
+  // Keep the page from scrolling out from under the game.
+  canvasElement.addEventListener('keydown', function (e) {
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].indexOf(e.key) !== -1) {
+      e.preventDefault();
+    }
+  });
+  canvasElement.addEventListener('click', function () { canvasElement.focus(); });
+</script>
+
+{{{ SCRIPT }}}
+
+</body>
+</html>

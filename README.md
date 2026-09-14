@@ -7,7 +7,7 @@ KEK is a 2D/3D software renderer/engine written in pure C99 with no dynamic allo
 Right now, it has 4 components:
 - `kek/` — the engine itself: rasterization (2D and 3D), math, pool allocator, model/image/palette/font handling
 - `game/` — game/business logic
-- `platform/` — platform implementation files (SDL3 for now; builds on Windows and Linux)
+- `platform/` — platform implementation files (SDL3 for now; builds on Windows, Linux and, through Emscripten, the browser)
 - `tools/kek_editor/` — an editor built on Dear ImGui (C++20) that links against the engine. The shell and the tool-plugin architecture work; the scene and model tools are still stubs.
 
 `scripts/` holds the asset converters: `obj_to_kmf.py` (models), `bmp_to_kif.py` (images), `bdf_to_c.py` (fonts), `palette_to_bmp.py`.
@@ -28,6 +28,30 @@ The game resolves assets against the working directory, so run it from its outpu
 ```sh
 cd build/Debug && ./SnusShooter_sdl
 ```
+
+### Browser build
+
+The SDL3 platform layer also builds for the web through Emscripten, so the same
+`platform/main_sdl.c` produces the desktop executable and the demo page. With
+`emcc` on PATH:
+
+```sh
+emcmake cmake -B build-web -DCMAKE_BUILD_TYPE=Release
+cmake --build build-web
+```
+
+That writes `build-web/Release/index.{html,js,wasm}` — the assets are embedded in
+the module, so the three files are the whole page. Serve them over HTTP (`file://`
+will not load the wasm):
+
+```sh
+python3 -m http.server -d build-web/Release
+```
+
+The page is built and published to GitHub Pages by `.github/workflows/web-demo.yml`
+on every push to `master`; the repository's Pages source has to be set to
+"GitHub Actions" once for the deploy step to work. The editor is not part of the
+browser build.
 
 To build against local copies of the dependencies instead of fetching them:
 

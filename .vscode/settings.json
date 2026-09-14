@@ -1,0 +1,6 @@
+{
+    "C_Cpp.codeAnalysis.clangTidy.enabled": true,
+    "cmake.preferredGenerators": [
+        "Ninja Multi-Config"
+    ]
+}

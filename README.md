@@ -1,8 +1,7 @@
 # KEK engine
 
 ## Overview
-KEK is a 2D/3D software renderer/engine written in pure C99 with no dynamic allocations. Its goal is to be compatible with as many platforms as possible.
-Also it aims at having almost non-existant CPU or memory requirements.
+KEK is a 2D/3D software renderer/engine written in pure C99 with no dynamic allocations. It draws into a 320×200 framebuffer with a 256-color palette and targets 30 FPS. The goal is to run on as many platforms as possible with almost non-existent CPU and memory requirements.
 
 ## Structure
 Right now, it has 4 components:
@@ -15,7 +14,7 @@ Right now, it has 4 components:
 
 ## Building
 
-Requires CMake 3.20+ and a C99 / C++20 toolchain. A system-wide SDL3 is used if one is installed; otherwise SDL3 is fetched and built from source. Dear ImGui is always fetched. A fresh clone needs no setup:
+Requires CMake 3.20+ and a C99 / C++20 toolchain. CMake uses a system-wide SDL3 if you have one and builds it from source otherwise; it always fetches Dear ImGui. A fresh clone needs no setup:
 
 ```sh
 cmake -B build

@@ -14,6 +14,12 @@ Right now, it has 4 components:
 
 `scripts/` holds the asset converters: `obj_to_kmf.py` (models), `bmp_to_kif.py` (images), `bdf_to_c.py` (fonts), `palette_to_bmp.py`.
 
+## Roadmap
+
+The engine targets a Pentium and should still run on a 486, which settles a few things — fixed-point arithmetic among them. The current focus is the foundation rather than features: tests, a native CI build, compiler warnings, and a handful of defects worth fixing before anything is built on top. Levels, lighting and a working editor come after that.
+
+[BACKLOG.md](BACKLOG.md) has the whole list, ordered by what unblocks what.
+
 ## Building
 
 Requires CMake 3.20+ and a C99 / C++20 toolchain. CMake uses a system-wide SDL3 if you have one and builds it from source otherwise; it always fetches Dear ImGui. A fresh clone needs no setup:

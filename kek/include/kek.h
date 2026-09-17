@@ -45,8 +45,8 @@ struct KEK_engine {
 KEK_engine kek_init(void);
 void kek_pool_init(KEK_engine* engine);
 
-void kek_set_palette(KEK_engine* e, KEK_palette_item* palette);
-void kek_set_shading_palette(KEK_engine* e, KEK_palette_item* shading_palette);
+void kek_set_palette(KEK_engine* e, const KEK_palette_item* palette);
+void kek_set_shading_palette(KEK_engine* e, const uint8_t* shading_palette);
 void kek_invalidate_shading_palette(KEK_engine* e);
 
 void kek_set_scene(KEK_engine* engine, KEK_scene* scene);

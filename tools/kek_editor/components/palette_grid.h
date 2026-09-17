@@ -50,9 +50,9 @@ struct PaletteGrid {
                 ImGui::SameLine();
                 ImGui::Text("#%03d\nR:%d G:%d B:%d",
                     i,
-                    palette[i].channels.r,
-                    palette[i].channels.g,
-                    palette[i].channels.b);
+                    palette[i].r,
+                    palette[i].g,
+                    palette[i].b);
                 ImGui::EndTooltip();
             }
 
@@ -81,9 +81,9 @@ private:
         ImGui::Spacing();
 
         // Per-channel sliders (0-63, 6-bit)
-        int r = entry.channels.r;
-        int g = entry.channels.g;
-        int b = entry.channels.b;
+        int r = entry.r;
+        int g = entry.g;
+        int b = entry.b;
         bool changed = false;
 
         ImGui::PushItemWidth(200.0f);
@@ -109,34 +109,34 @@ private:
         ImGui::PopItemWidth();
 
         if (changed) {
-            entry.channels.r = (uint8_t)r;
-            entry.channels.g = (uint8_t)g;
-            entry.channels.b = (uint8_t)b;
+            entry.r = (uint8_t)r;
+            entry.g = (uint8_t)g;
+            entry.b = (uint8_t)b;
         }
 
         ImGui::Spacing();
 
         // Color picker — always derived from current values so it stays in sync with sliders
         float rgb[3] = {
-            entry.channels.r / 63.0f,
-            entry.channels.g / 63.0f,
-            entry.channels.b / 63.0f,
+            entry.r / 63.0f,
+            entry.g / 63.0f,
+            entry.b / 63.0f,
         };
         if (ImGui::ColorPicker3("##pick", rgb,
                 ImGuiColorEditFlags_NoAlpha |
                 ImGuiColorEditFlags_NoInputs |
                 ImGuiColorEditFlags_PickerHueWheel)) {
-            entry.channels.r = (uint8_t)roundf(rgb[0] * 63.0f);
-            entry.channels.g = (uint8_t)roundf(rgb[1] * 63.0f);
-            entry.channels.b = (uint8_t)roundf(rgb[2] * 63.0f);
+            entry.r = (uint8_t)roundf(rgb[0] * 63.0f);
+            entry.g = (uint8_t)roundf(rgb[1] * 63.0f);
+            entry.b = (uint8_t)roundf(rgb[2] * 63.0f);
         }
     }
 
     static ImVec4 to_float(KEK_palette_item item) {
         return ImVec4(
-            item.channels.r / 63.0f,
-            item.channels.g / 63.0f,
-            item.channels.b / 63.0f,
+            item.r / 63.0f,
+            item.g / 63.0f,
+            item.b / 63.0f,
             1.0f);
     }
 };

@@ -34,7 +34,7 @@ static App APP;
 
 static void app_build_palette(App* app) {
     for (int i = 0; i < 256; ++i) {
-        struct KEK_palette_channels c = app->engine.palette[i].channels;
+        KEK_palette_item c = app->engine.palette[i];
         uint8_t r = c.r << 2 | c.r >> 4;
         uint8_t g = c.g << 2 | c.g >> 4;
         uint8_t b = c.b << 2 | c.b >> 4;

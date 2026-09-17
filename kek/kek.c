@@ -42,13 +42,15 @@ KEK_engine kek_init(void) {
     return result;
 }
 
-void kek_set_palette(KEK_engine *e, KEK_palette_item *palette) {
+void kek_set_palette(KEK_engine *e, const KEK_palette_item *palette) {
     memcpy(e->palette, palette, 256 * sizeof(KEK_palette_item));
     kek_palette_calculate_shading(e->shading_palette, e->palette);
 }
 
-void kek_set_shading_palette(KEK_engine *e, KEK_palette_item *shading_palette) {
-    memcpy(e->shading_palette, shading_palette, 256 * KEK_PALETTE_SHADING_LEVELS * sizeof(KEK_palette_item));
+/* A shading palette is a table of palette *indices*, one row of 256 per shading
+   level — not a table of colours. */
+void kek_set_shading_palette(KEK_engine *e, const uint8_t *shading_palette) {
+    memcpy(e->shading_palette, shading_palette, 256 * KEK_PALETTE_SHADING_LEVELS);
 }
 
 void kek_invalidate_shading_palette(KEK_engine *e) {

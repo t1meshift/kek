@@ -1,0 +1,133 @@
+name: Native
+
+# Builds the engine, the game, the SDL3 platform layer and the editor on the
+# toolchains people actually use. web-demo.yml covers Emscripten and is
+# deliberately separate — it publishes, this one only checks.
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch supersedes an in-flight run.
+concurrency:
+  group: native-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One red compiler should not hide what the other two think.
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux GCC
+            os: ubuntu-latest
+            cc: gcc
+            cxx: g++
+            generator: -G Ninja
+            # Warnings are errors where we have seen the output.
+            werror: ON
+          - name: Linux Clang
+            os: ubuntu-latest
+            cc: clang
+            cxx: clang++
+            generator: -G Ninja
+            werror: ON
+          - name: Windows MSVC
+            os: windows-latest
+            # Default generator: MSBuild, which is what a VS developer gets.
+            generator: ''
+            # MSVC gets /W4 but not /WX yet — nobody has read what /W4 makes of
+            # this code. Turn this ON once a run has shown it is clean.
+            werror: OFF
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # No system SDL3 on the runner, so CMake fetches and builds it from
+      # source. These are what its Linux video backends need; without them SDL3
+      # still builds, but only with the dummy driver.
+      - name: Install SDL3 build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxi-dev libxfixes-dev libxss-dev \
+            libwayland-dev wayland-protocols libxkbcommon-dev \
+            libdecor-0-dev libegl1-mesa-dev libgl1-mesa-dev
+
+      # Building SDL3 from source dominates the run. The cache holds both the
+      # fetched sources and their build tree, keyed so that any change to the
+      # dependency pins or the CMake setup invalidates it.
+      - name: Cache fetched dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-${{ matrix.os }}-${{ matrix.cc || 'msvc' }}-${{ hashFiles('CMakeLists.txt') }}
+
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: >
+          cmake -B build ${{ matrix.generator }}
+          -DCMAKE_BUILD_TYPE=Release
+          -DKEK_WERROR=${{ matrix.werror }}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      # No tests yet (BACKLOG.md Tier 0). The step is here so the harness is
+      # wired up the day the first one lands; --no-tests=ignore keeps an empty
+      # suite from being an error on every CMake version.
+      - name: Test
+        run: ctest --test-dir build --build-config Release --output-on-failure --no-tests=ignore
+
+  tidy:
+    name: clang-tidy
+    runs-on: ubuntu-latest
+    # Non-blocking on purpose — see the note in .clang-tidy. Flip this off, and
+    # WarningsAsErrors on, once the tree is clean.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang-tidy ninja-build \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxi-dev libxfixes-dev libxss-dev \
+            libwayland-dev wayland-protocols libxkbcommon-dev \
+            libdecor-0-dev libegl1-mesa-dev libgl1-mesa-dev
+
+      - name: Cache fetched dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-tidy-ubuntu-latest-${{ hashFiles('CMakeLists.txt') }}
+
+      # clang-tidy needs compile_commands.json, which CMAKE_EXPORT_COMPILE_COMMANDS
+      # writes; the build has to run first so generated headers exist.
+      - name: Configure and build
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build --parallel
+
+      # Only our own sources — _deps holds SDL3 and Dear ImGui, whose warnings
+      # are not ours to fix.
+      - name: Run clang-tidy
+        run: |
+          run-clang-tidy -p build -quiet \
+            '^${{ github.workspace }}/(kek|game|platform|tools)/' \
+            | tee tidy.log
+          echo "### clang-tidy: $(grep -c 'warning:' tidy.log) warnings" >> "$GITHUB_STEP_SUMMARY"

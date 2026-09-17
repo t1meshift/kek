@@ -96,6 +96,10 @@ set(
   "${CMAKE_BINARY_DIR}/$<CONFIGURATION>"
 )
 
+# No tests yet — see BACKLOG.md Tier 0. This is here so `ctest --test-dir build`
+# is a working no-op rather than an error, which is what CI runs today.
+enable_testing()
+
 ######## Warnings ########
 # Applied to the engine, the game, the platform layer and the editor — but not
 # to the vendored Dear ImGui, whose warnings are not ours to fix. PRIVATE so the

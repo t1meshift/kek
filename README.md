@@ -31,6 +31,8 @@ cmake --build build
 
 Targets: `kek` (engine), `SnusShooter` (game logic), `kek_editor` (editor), and `SnusShooter_sdl` (the playable executable).
 
+`-Wall -Wextra -Wpedantic` (`/W4` on MSVC) are on for everything but the vendored Dear ImGui. `-DKEK_WERROR=ON` turns them into errors; `.github/workflows/native.yml` builds that way on Linux GCC, Linux Clang and Windows MSVC, and runs `clang-tidy` as a separate non-blocking job.
+
 The game resolves assets against the working directory, so run it from its output directory:
 
 ```sh

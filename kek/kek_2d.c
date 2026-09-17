@@ -284,14 +284,13 @@ void kek_2d_line(KEK_engine* engine, KEK_IVec2 p0, KEK_IVec2 p1, uint8_t color) 
 }
 
 void kek_2d_rect(KEK_engine* engine, KEK_IVec2 p0, KEK_IVec2 p1, uint8_t color_fill) {
-    int w, h, sx, sy, x, y;
+    int w, h, sy, y;
     w = engine->w;
     h = engine->h;
     int x0 = KEK_MAX(0, KEK_MIN(p0.x, w - 1));
     int x1 = KEK_MAX(0, KEK_MIN(p1.x, w - 1));
     int y0 = KEK_MAX(0, KEK_MIN(p0.y, h - 1));
     int y1 = KEK_MAX(0, KEK_MIN(p1.y, h - 1));
-    sx = x0 < x1 ? 1 : -1;
     sy = y0 < y1 ? 1 : -1;
 
     for (y = y0; y < y1*sy; y += sy) {

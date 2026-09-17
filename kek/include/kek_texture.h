@@ -7,7 +7,10 @@ extern "C" {
 
 #include <stdint.h>
 
+#ifndef KEK_ENGINE_DEFINED
+#define KEK_ENGINE_DEFINED
 typedef struct KEK_engine KEK_engine;
+#endif
 #ifndef KEK_TEXTURE_HANDLE_DEFINED
 #define KEK_TEXTURE_HANDLE_DEFINED
 typedef uint32_t KEK_TextureHandle;

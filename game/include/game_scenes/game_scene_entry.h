@@ -16,7 +16,7 @@ typedef struct GAME_EntryScene {
     uint32_t ticks;
 } GAME_EntryScene;
 
-GAME_EntryScene GAME_EntryScene_init();
+GAME_EntryScene GAME_EntryScene_init(void);
 
 void GAME_EntryScene_enter(KEK_scene* scene, KEK_engine* e);
 void GAME_EntryScene_exit(KEK_scene* scene, KEK_engine* e);

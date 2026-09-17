@@ -12,7 +12,10 @@ extern "C" {
 #include "kek_pool.h"
 
 typedef struct KEK_scene KEK_scene;
+#ifndef KEK_ENGINE_DEFINED
+#define KEK_ENGINE_DEFINED
 typedef struct KEK_engine KEK_engine;
+#endif
 
 struct KEK_scene {
     void (*enter)(KEK_scene* scene, KEK_engine* e);

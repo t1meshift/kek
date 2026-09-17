@@ -11,7 +11,7 @@ GAME_Context GAME_ctx = {
     .scenes_count = GAME_SCENETAG_COUNT
 };
 
-KEK_scene* GAME_init_ctx() {
+KEK_scene* GAME_init_ctx(void) {
     KEK_STATIC_ASSERT(GAME_SCENETAG_ENTRY == 0);
     GAME_init_scene(GAME_SCENETAG_ENTRY);
 

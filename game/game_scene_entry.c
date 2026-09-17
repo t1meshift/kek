@@ -46,7 +46,7 @@ static void _GAME_EntryScene_reset(GAME_EntryScene* s) {
     s->texture = KEK_TEXTURE_HANDLE_INVALID;
 }
 
-GAME_EntryScene GAME_EntryScene_init() {
+GAME_EntryScene GAME_EntryScene_init(void) {
     GAME_EntryScene result;
     _GAME_EntryScene_reset(&result);
     return result;
@@ -115,6 +115,8 @@ void GAME_EntryScene_update(KEK_scene* scene, KEK_engine* e, float dt) {
     KEK_FVec3 forward;
     KEK_FVec3 right;
 
+    (void)e; /* part of the scene callback signature, not a use */
+
     const float move_speed = 1.f;
     const float rotate_speed = 3.1415f / 4.f;
 
@@ -154,14 +156,6 @@ void GAME_EntryScene_render(KEK_scene* scene, KEK_engine* e) {
     GAME_EntryScene* s = (GAME_EntryScene*)scene;
     uint32_t ticks = s->ticks;
     KEK_model* mdl = kek_model_get(e, s->model);
-
-    KEK_IVec2 triangle[3];
-    KEK_IVec2 a = {180, 120};
-    KEK_IVec2 b = {150, 135};
-    KEK_IVec2 c = {220, 142};
-    triangle[0] = a;
-    triangle[1] = b;
-    triangle[2] = c;
 
     for (int i = 0; i < 16; ++i) {
         char kal[8] = {0,};
@@ -209,6 +203,7 @@ void GAME_EntryScene_render(KEK_scene* scene, KEK_engine* e) {
 
 void GAME_EntryScene_key_up(KEK_scene* scene, KEK_engine* e, KEK_scancode key) {
     GAME_EntryScene* s = (GAME_EntryScene*)scene;
+    (void)e;
 
     if (key == KEK_SCANCODE_W) {
         UNSET_MOVE(s->movement, MOVE_FORWARD);
@@ -244,6 +239,7 @@ void GAME_EntryScene_key_up(KEK_scene* scene, KEK_engine* e, KEK_scancode key) {
 
 void GAME_EntryScene_key_down(KEK_scene* scene, KEK_engine* e, KEK_scancode key) {
     GAME_EntryScene* s = (GAME_EntryScene*)scene;
+    (void)e;
 
     if (key == KEK_SCANCODE_W) {
         SET_MOVE(s->movement, MOVE_FORWARD);

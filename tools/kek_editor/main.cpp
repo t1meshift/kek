@@ -9,6 +9,8 @@
 #include "tools/demo_tool.h"
 
 int main(int argc, char* argv[]) {
+    (void)argc;
+    (void)argv;
     SDL_Init(SDL_INIT_VIDEO);
 
     SDL_Window* window;

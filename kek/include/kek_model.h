@@ -9,12 +9,19 @@ extern "C" {
 #include "kek_math.h"
 #include "kek_texture.h"
 
+#ifndef KEK_ENGINE_DEFINED
+#define KEK_ENGINE_DEFINED
 typedef struct KEK_engine KEK_engine;
+#endif
 #ifndef KEK_MODEL_HANDLE_DEFINED
 #define KEK_MODEL_HANDLE_DEFINED
 typedef uint32_t KEK_ModelHandle;
 #endif
 #define KEK_MODEL_HANDLE_INVALID ((KEK_ModelHandle)0u)
+#ifndef KEK_MODEL_DEFINED
+#define KEK_MODEL_DEFINED
+typedef struct KEK_model KEK_model;
+#endif
 
 typedef struct KEK_model_face {
     uint32_t a, b, c;
@@ -28,7 +35,7 @@ typedef struct KEK_model_face_normal {
     KEK_FVec3 a, b, c;
 } KEK_model_face_normal;
 
-typedef struct KEK_model {
+struct KEK_model {
     KEK_FVec3* verts;
     KEK_model_face* faces;
     KEK_model_face_normal* face_normals;
@@ -47,7 +54,7 @@ typedef struct KEK_model {
     uint32_t face_normals_count;
     uint32_t colors_count;
     uint32_t textures_count;
-} KEK_model;
+};
 
 KEK_ModelHandle kek_model_create(KEK_engine* e);
 KEK_ModelHandle kek_model_clone(KEK_engine* e, const KEK_model* source);

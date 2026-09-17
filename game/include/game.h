@@ -13,6 +13,6 @@ extern GAME_Context GAME_ctx;
 /**
 Initializes global game context, then returns an entry point scene.
 */
-KEK_scene* GAME_init_ctx();
+KEK_scene* GAME_init_ctx(void);
 
 #endif // GAME_H

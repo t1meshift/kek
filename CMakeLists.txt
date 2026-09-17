@@ -96,6 +96,26 @@ set(
   "${CMAKE_BINARY_DIR}/$<CONFIGURATION>"
 )
 
+######## Warnings ########
+# Applied to the engine, the game, the platform layer and the editor — but not
+# to the vendored Dear ImGui, whose warnings are not ours to fix. PRIVATE so the
+# flags do not leak into anything linking against kek.
+#
+# MSVC gets /W4 but not /WX yet: nobody has looked at what /W4 has to say about
+# this code, and a red master on a compiler none of us runs is not worth it.
+option(KEK_WERROR "Treat compiler warnings as errors" OFF)
+
+function(kek_target_warnings target)
+  if(MSVC)
+    target_compile_options(${target} PRIVATE /W4)
+  else()
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+    if(KEK_WERROR)
+      target_compile_options(${target} PRIVATE -Werror)
+    endif()
+  endif()
+endfunction()
+
 ######## KEK engine ########
 add_library(kek 
   kek/include/kek_asset.h
@@ -132,6 +152,7 @@ set_target_properties(kek PROPERTIES
   C_STANDARD_REQUIRED ON
   C_EXTENSIONS OFF
 )
+kek_target_warnings(kek)
 target_include_directories(kek PUBLIC
   kek/include/
 )
@@ -167,6 +188,7 @@ set_target_properties(${GAME_NAME} PROPERTIES
   C_STANDARD_REQUIRED ON
   C_EXTENSIONS OFF
 )
+kek_target_warnings(${GAME_NAME})
 target_include_directories(${GAME_NAME} PUBLIC
   game/include/
 )
@@ -185,6 +207,7 @@ set_target_properties(${GAME_NAME}_sdl PROPERTIES
   C_STANDARD_REQUIRED ON
   C_EXTENSIONS OFF
 )
+kek_target_warnings(${GAME_NAME}_sdl)
 target_link_libraries(${GAME_NAME}_sdl PRIVATE kek ${GAME_NAME} SDL3::SDL3)
 
 if(WIN32)
@@ -267,6 +290,7 @@ set_target_properties(kek_editor PROPERTIES
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
 )
+kek_target_warnings(kek_editor)
 target_link_libraries(kek_editor PRIVATE kek SDL3::SDL3 imgui)
 
 if(WIN32)

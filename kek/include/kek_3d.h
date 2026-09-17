@@ -10,7 +10,10 @@ extern "C" {
 #include "kek_math.h"
 #include "kek_texture.h"
 
-typedef struct KEK_model KEK_model; // forward declaration
+#ifndef KEK_MODEL_DEFINED
+#define KEK_MODEL_DEFINED
+typedef struct KEK_model KEK_model;
+#endif
 
 typedef struct KEK_camera {
     KEK_FVec3 position;

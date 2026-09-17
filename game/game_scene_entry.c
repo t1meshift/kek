@@ -73,7 +73,9 @@ void _GAME_EntryScene_load_assets(GAME_EntryScene* s, KEK_engine* e) {
             return;
         }
 
-        mdl->texture = kek_texture_get(e, s->texture);
+        /* The scene keeps ownership — it releases the texture in exit(), and
+           the model here is the default cube, which is never destroyed. */
+        mdl->texture = s->texture;
     }
 
     if (!e->assets) {

@@ -147,7 +147,8 @@ KEK_ModelHandle kek_file_model_load(KEK_engine *e, const char *path) {
     out_model->face_normals_count = 0;
     out_model->colors_count = 0;
     out_model->textures_count = 0;
-    out_model->texture = 0;
+    out_model->texture = KEK_TEXTURE_HANDLE_INVALID;
+    out_model->owns_texture = 0;
 
     for (uint16_t i = 0; i < hdr.faces_count; ++i) {
         for (uint16_t j = 0; j < 3; ++j) {
@@ -245,7 +246,9 @@ KEK_ModelHandle kek_file_model_load(KEK_engine *e, const char *path) {
             kek_model_destroy(e, model_handle);
             return KEK_MODEL_HANDLE_INVALID;
         }
-        out_model->texture = kek_texture_get(e, texture_handle);
+        /* The model loaded this texture, so the model releases it. */
+        out_model->texture = texture_handle;
+        out_model->owns_texture = 1;
     }
 
     kek_asset_close(&stream);

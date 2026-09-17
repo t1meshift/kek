@@ -45,8 +45,9 @@ static void kek_pool_init_model_slot(KEK_ModelPoolSlot* slot) {
     slot->model.faces = slot->faces;
     slot->model.face_normals = slot->face_normals;
     slot->model.face_colors = slot->face_colors;
-    slot->model.texture = 0;
     slot->model.face_textures = slot->face_textures;
+    slot->model.texture = KEK_TEXTURE_HANDLE_INVALID;
+    slot->model.owns_texture = 0;
     slot->model.verts_count = 0;
     slot->model.faces_count = 0;
     slot->model.face_normals_count = 0;
@@ -106,7 +107,10 @@ static int kek_pool_copy_model(KEK_ModelPoolSlot* slot, const KEK_model* source)
     slot->model.face_normals_count = source->face_normals ? source->face_normals_count : 0;
     slot->model.colors_count = source->face_colors ? source->colors_count : 0;
     slot->model.textures_count = source->face_textures ? source->textures_count : 0;
+    /* The clone points at the same texture but never owns it — only the
+       original gets to release that slot. */
     slot->model.texture = source->texture;
+    slot->model.owns_texture = 0;
     return 1;
 }
 
@@ -147,9 +151,10 @@ void kek_pool_init(KEK_engine* e) {
 
     if (default_model != KEK_MODEL_HANDLE_INVALID) {
         KEK_model* mdl = kek_model_get(e, default_model);
-        KEK_texture* tex = kek_texture_get(e, default_texture);
         if (mdl) {
-            mdl->texture = tex;
+            /* Not owned: kek_texture_destroy refuses the default texture
+               anyway, and the default cube is never destroyed either. */
+            mdl->texture = default_texture;
         }
     }
 }
@@ -309,6 +314,10 @@ void kek_model_destroy(KEK_engine* e, KEK_ModelHandle handle) {
     slot = &e->model_pool.slots[index];
     if (!slot->used || slot->generation != kek_pool_generation(handle)) {
         return;
+    }
+
+    if (slot->model.owns_texture) {
+        kek_texture_destroy(e, slot->model.texture);
     }
 
     slot->used = 0;

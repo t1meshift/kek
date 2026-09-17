@@ -14,6 +14,7 @@ typedef struct KEK_engine KEK_engine;
 #define KEK_MODEL_HANDLE_DEFINED
 typedef uint32_t KEK_ModelHandle;
 #endif
+#define KEK_MODEL_HANDLE_INVALID ((KEK_ModelHandle)0u)
 
 typedef struct KEK_model_face {
     uint32_t a, b, c;
@@ -32,8 +33,15 @@ typedef struct KEK_model {
     KEK_model_face* faces;
     KEK_model_face_normal* face_normals;
     uint8_t* face_colors;
-    KEK_texture* texture;
     KEK_model_face_uv* face_textures;
+    /* A handle rather than a KEK_texture*: the pool slot behind a raw pointer
+       can never be released, and a stale handle is a detectable error where a
+       dangling pointer is a corrupted triangle. */
+    KEK_TextureHandle texture;
+    /* Set only by whoever loaded the texture for this model — kek_model_destroy
+       releases it. kek_model_clone copies the handle but never the ownership,
+       so destroying a clone cannot pull the texture out from under the original. */
+    uint8_t owns_texture;
     uint32_t verts_count;
     uint32_t faces_count;
     uint32_t face_normals_count;

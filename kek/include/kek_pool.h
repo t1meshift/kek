@@ -10,17 +10,8 @@ extern "C" {
 #include "kek_model.h"
 #include "kek_texture.h"
 
-#define KEK_MODEL_HANDLE_INVALID ((KEK_ModelHandle)0u)
-#define KEK_TEXTURE_HANDLE_INVALID ((KEK_TextureHandle)0u)
-
-#ifndef KEK_MODEL_HANDLE_DEFINED
-#define KEK_MODEL_HANDLE_DEFINED
-typedef uint32_t KEK_ModelHandle;
-#endif
-#ifndef KEK_TEXTURE_HANDLE_DEFINED
-#define KEK_TEXTURE_HANDLE_DEFINED
-typedef uint32_t KEK_TextureHandle;
-#endif
+/* The handle types and their invalid values live next to what they refer to,
+   in kek_model.h and kek_texture.h — both are included above. */
 
 typedef struct KEK_ModelPoolSlot {
     KEK_model model;

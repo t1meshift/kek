@@ -12,6 +12,7 @@ typedef struct KEK_engine KEK_engine;
 #define KEK_TEXTURE_HANDLE_DEFINED
 typedef uint32_t KEK_TextureHandle;
 #endif
+#define KEK_TEXTURE_HANDLE_INVALID ((KEK_TextureHandle)0u)
 
 typedef enum KEK_TextureWarpMode {
     KEK_TEXTURE_WARP_CLAMP = 0,

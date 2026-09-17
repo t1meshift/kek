@@ -144,8 +144,11 @@ KEK_model KEK_CUBE_MODEL = (KEK_model) {
     .faces = _kek_cube_faces,
     .face_normals = _kek_cube_face_normals,
     .face_colors = _kek_cube_colors,
-    .texture = &KEK_DEFAULT_TEXTURE,
     .face_textures = _kek_vts,
+    /* Texture handles only exist once a pool does; kek_pool_init hands the
+       cloned cube the default texture's handle. */
+    .texture = KEK_TEXTURE_HANDLE_INVALID,
+    .owns_texture = 0,
     .verts_count = 8,
     .faces_count = 12,
     .face_normals_count = 12,

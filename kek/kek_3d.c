@@ -277,6 +277,9 @@ void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FV
     /* Fix 1: static buffers — avoids ~25 KB of stack allocation per draw call */
     static KEK_FVec3 view_verts[KEK_POOL_MODEL_VERTS_MAX];
     char use_colors = mdl->face_colors != 0 && mdl->colors_count > 0;
+    /* Resolved once per model, not once per face: a stale handle just means
+       the model draws untextured. */
+    KEK_texture* texture = kek_texture_get(e, mdl->texture);
     /* Fix 4: precompute rotation matrices and projection constants once per call */
     KEK_Mat3 model_rot, camera_rot;
     float aspect_ratio, focal_length, half_w, half_h;
@@ -321,7 +324,7 @@ void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FV
             .b = {NAN, NAN},
             .c = {NAN, NAN}
         };
-        face_is_textured = mdl->texture != 0 &&
+        face_is_textured = texture != 0 &&
             mdl->face_textures != 0 &&
             i < mdl->textures_count &&
             !KEK_IS_NAN(face_uv.a.x) && !KEK_IS_NAN(face_uv.a.y) &&
@@ -386,7 +389,7 @@ void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FV
             }
 
             if (face_is_textured) {
-                kek_3d_triangle_textured(e, pv, mdl->texture);
+                kek_3d_triangle_textured(e, pv, texture);
             } else {
                 kek_3d_triangle(e, pv, color);
             }

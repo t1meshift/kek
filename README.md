@@ -68,3 +68,8 @@ cmake -B build -DKEK_FETCH_DEPS=OFF \
   -DKEK_SDL3_LOCAL_DIR=ext/SDL3-3.4.2 \
   -DKEK_IMGUI_LOCAL_DIR=ext/imgui-1.92.6-docking
 ```
+
+## License
+
+All rights reserved — see [LICENSE](LICENSE). The source is public to read and
+build locally; it is not open source.

@@ -271,7 +271,9 @@ void kek_2d_line(KEK_engine* engine, KEK_IVec2 p0, KEK_IVec2 p1, uint8_t color) 
 
     do {
         kek_blit(engine, x0, y0, color);
-        e2 = error << 1;
+        /* Not error << 1: error is routinely negative here, and shifting a
+           negative value left is undefined. The multiply is the same code. */
+        e2 = error * 2;
         if (e2 >= dy) {
             error = error + dy;
             x0 = x0 + sx;
@@ -283,27 +285,64 @@ void kek_2d_line(KEK_engine* engine, KEK_IVec2 p0, KEK_IVec2 p1, uint8_t color) 
     } while ((x1 - x0) * sx > 0 || (y1 - y0) * sy > 0);
 }
 
-void kek_2d_rect(KEK_engine* engine, KEK_IVec2 p0, KEK_IVec2 p1, uint8_t color_fill) {
-    int w, h, sy, y;
-    w = engine->w;
-    h = engine->h;
-    int x0 = KEK_MAX(0, KEK_MIN(p0.x, w - 1));
-    int x1 = KEK_MAX(0, KEK_MIN(p1.x, w - 1));
-    int y0 = KEK_MAX(0, KEK_MIN(p0.y, h - 1));
-    int y1 = KEK_MAX(0, KEK_MIN(p1.y, h - 1));
-    sy = y0 < y1 ? 1 : -1;
+/* kek_blit and kek_line do not clip — that is what makes them fast paths, and
+   why they live in kek_internal.h. These two are the clipping counterparts,
+   for the primitives below that generate spans and points in unbounded
+   coordinates. Everything here that touches the framebuffer goes through one
+   of them. */
 
-    for (y = y0; y < y1*sy; y += sy) {
-        kek_line(engine, y, x0, x1, color_fill);
+static void kek_2d_span(KEK_engine* engine, int y, int x0, int x1, uint8_t color) {
+    if (y < 0 || y >= engine->h) {
+        return;
+    }
+    if (x0 > x1) {
+        KEK_SWAP(int, x0, x1);
+    }
+    /* Reject rather than clamp: clamping a fully off-screen span would glue a
+       one-pixel sliver to the edge it fell off. */
+    if (x1 < 0 || x0 >= engine->w) {
+        return;
+    }
+    x0 = KEK_MAX(x0, 0);
+    x1 = KEK_MIN(x1, engine->w - 1);
+    kek_line(engine, (uint16_t)y, (uint16_t)x0, (uint16_t)x1, color);
+}
+
+static void kek_2d_point(KEK_engine* engine, int x, int y, uint8_t color) {
+    if (x < 0 || x >= engine->w || y < 0 || y >= engine->h) {
+        return;
+    }
+    kek_blit(engine, (uint16_t)x, (uint16_t)y, color);
+}
+
+/* Half-open in y and closed in x. Lopsided, but it is the existing convention:
+   the debug bars in the game tile as {0, i*8} to {8, (i+1)*8} and rely on the
+   bottom row being exclusive. */
+void kek_2d_rect(KEK_engine* engine, KEK_IVec2 p0, KEK_IVec2 p1, uint8_t color_fill) {
+    int y0 = p0.y;
+    int y1 = p1.y;
+    int y;
+
+    if (y0 > y1) {
+        KEK_SWAP(int, y0, y1);
+    }
+
+    for (y = y0; y < y1; ++y) {
+        kek_2d_span(engine, y, p0.x, p1.x, color_fill);
     }
 }
 
 void kek_2d_rect_border(KEK_engine* engine, KEK_IVec2 p0, KEK_IVec2 p1, uint8_t color_fill, uint8_t color_border) {
+    KEK_IVec2 tl = { p0.x, p0.y };
+    KEK_IVec2 tr = { p1.x, p0.y };
+    KEK_IVec2 br = { p1.x, p1.y };
+    KEK_IVec2 bl = { p0.x, p1.y };
+
     kek_2d_rect(engine, p0, p1, color_fill);
-    kek_2d_line(engine, p0, p1, color_border);
-    kek_2d_line(engine, p0, p1, color_border);
-    kek_2d_line(engine, p0, p1, color_border);
-    kek_2d_line(engine, p0, p1, color_border);
+    kek_2d_line(engine, tl, tr, color_border);
+    kek_2d_line(engine, tr, br, color_border);
+    kek_2d_line(engine, br, bl, color_border);
+    kek_2d_line(engine, bl, tl, color_border);
 }
 
 void kek_2d_circle(KEK_engine* engine, KEK_IVec2 p, uint16_t radius, uint8_t color_fill) {
@@ -313,10 +352,10 @@ void kek_2d_circle(KEK_engine* engine, KEK_IVec2 p, uint16_t radius, uint8_t col
     mx = radius;
     my = 0;
     while (mx >= my) {
-        kek_line(engine, p.y + my, p.x - mx, p.x + mx, color_fill);
-        kek_line(engine, p.y - my, p.x - mx, p.x + mx, color_fill);
-        kek_line(engine, p.y + mx, p.x - my, p.x + my, color_fill);
-        kek_line(engine, p.y - mx, p.x - my, p.x + my, color_fill);
+        kek_2d_span(engine, p.y + my, p.x - mx, p.x + mx, color_fill);
+        kek_2d_span(engine, p.y - my, p.x - mx, p.x + mx, color_fill);
+        kek_2d_span(engine, p.y + mx, p.x - my, p.x + my, color_fill);
+        kek_2d_span(engine, p.y - mx, p.x - my, p.x + my, color_fill);
         ++my;
         t1 += my;
         t2 = t1 - mx;
@@ -335,14 +374,14 @@ void kek_2d_circle_border(KEK_engine* engine, KEK_IVec2 p, uint16_t radius, uint
     mx = radius;
     my = 0;
     while (mx >= my) {
-        kek_blit(engine, p.x + mx, p.y + my, color_border);
-        kek_blit(engine, p.x + mx, p.y - my, color_border);
-        kek_blit(engine, p.x - mx, p.y + my, color_border);
-        kek_blit(engine, p.x - mx, p.y - my, color_border);
-        kek_blit(engine, p.x + my, p.y + mx, color_border);
-        kek_blit(engine, p.x + my, p.y - mx, color_border);
-        kek_blit(engine, p.x - my, p.y + mx, color_border);
-        kek_blit(engine, p.x - my, p.y - mx, color_border);
+        kek_2d_point(engine, p.x + mx, p.y + my, color_border);
+        kek_2d_point(engine, p.x + mx, p.y - my, color_border);
+        kek_2d_point(engine, p.x - mx, p.y + my, color_border);
+        kek_2d_point(engine, p.x - mx, p.y - my, color_border);
+        kek_2d_point(engine, p.x + my, p.y + mx, color_border);
+        kek_2d_point(engine, p.x + my, p.y - mx, color_border);
+        kek_2d_point(engine, p.x - my, p.y + mx, color_border);
+        kek_2d_point(engine, p.x - my, p.y - mx, color_border);
         ++my;
         t1 += my;
         t2 = t1 - mx;

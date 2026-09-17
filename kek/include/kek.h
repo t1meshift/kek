@@ -53,8 +53,6 @@ void kek_set_scene(KEK_engine* engine, KEK_scene* scene);
 void kek_request_scene(KEK_engine* engine, KEK_scene* scene);
 
 void kek_flush_buffers(KEK_engine* engine);
-void kek_blit(KEK_engine* engine, uint16_t x, uint16_t y, uint8_t pixel);
-void kek_line(KEK_engine* engine, uint16_t y, uint16_t x0, uint16_t x1, uint8_t pixel);
 
 void kek_key_down(KEK_engine* engine, uint16_t key);
 void kek_key_up(KEK_engine* engine, uint16_t key);

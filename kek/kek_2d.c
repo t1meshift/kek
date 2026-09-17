@@ -5,6 +5,7 @@
 #include "kek_2d.h"
 #include "kek_font.h"
 #include "kek.h"
+#include "kek_internal.h"
 
 
 char kek_2d_clip_line(KEK_IVec2 *p0, KEK_IVec2 *p1, KEK_IRect2 v) {

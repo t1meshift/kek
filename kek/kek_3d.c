@@ -5,6 +5,7 @@
 #include "kek_2d.h"
 #include "kek_math.h"
 #include "kek_model.h"
+#include "kek_internal.h"
 
 #define KEK_PI 3.14159265358979323846f
 #define KEK_EPSILON 0.000001f

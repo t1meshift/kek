@@ -113,6 +113,7 @@ add_library(kek
   kek/include/kek_pool.h
   kek/include/kek_file_image.h
   kek/include/kek_file_model.h
+  kek/kek_internal.h
   kek/kek_default_font.c
   kek/kek_model.c
   kek/kek_palette.c

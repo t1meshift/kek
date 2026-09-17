@@ -80,14 +80,6 @@ void kek_flush_buffers(KEK_engine* e) {
     }
 }
 
-void kek_blit(KEK_engine* e, uint16_t x, uint16_t y, uint8_t pixel) {
-    e->fb[y * e->w + x] = pixel;
-}
-
-void kek_line(KEK_engine* e, uint16_t y, uint16_t x0, uint16_t x1, uint8_t pixel) {
-    memset(e->fb + (y * e->w) + x0, pixel, x1 - x0 + 1);
-}
-
 void kek_key_down(KEK_engine* e, uint16_t key) {
     if (e->scene && e->scene->key_down) {
         e->scene->key_down(e->scene, e, key);

@@ -50,7 +50,7 @@ void kek_set_palette(KEK_engine *e, const KEK_palette_item *palette) {
 /* A shading palette is a table of palette *indices*, one row of 256 per shading
    level — not a table of colours. */
 void kek_set_shading_palette(KEK_engine *e, const uint8_t *shading_palette) {
-    memcpy(e->shading_palette, shading_palette, 256 * KEK_PALETTE_SHADING_LEVELS);
+    memcpy(e->shading_palette, shading_palette, (size_t)256 * KEK_PALETTE_SHADING_LEVELS);
 }
 
 void kek_invalidate_shading_palette(KEK_engine *e) {
@@ -74,7 +74,7 @@ void kek_request_scene(KEK_engine *e, KEK_scene *scene) {
 }
 
 void kek_flush_buffers(KEK_engine* e) {
-    memset(e->fb, 0, e->w * e->h);
+    memset(e->fb, 0, (size_t)e->w * e->h);
     for (uint32_t i = 0; i < (uint32_t)e->w * (uint32_t)e->h; ++i) {
         e->db[i] = 0.f;
     }
@@ -98,7 +98,10 @@ static void _kek_apply_scene_switch(KEK_engine* e) {
         return;
     }
 
-    if (e->scene->exit) {
+    /* There may be no current scene to leave: kek_init() starts with none, so
+       a kek_request_scene() before the first kek_set_scene() lands here with
+       e->scene still null. kek_set_scene guards this; this did not. */
+    if (e->scene && e->scene->exit) {
         e->scene->exit(e->scene, e);
     }
 

@@ -32,9 +32,26 @@ These shape several items below, so they are recorded once here.
 - **`KEK_palette_item` does not lay out the way the code reads.** `sizeof` is 8, not 4: each 6-bit channel
   gets its own byte and five bytes are padding, so a 256-entry palette costs 2 KB. The `color:18` union
   member is lossy — writing `b = 63` reads back as `0x30000`, because only the low two bits of `b` fall
-  inside the 18-bit window. Nothing reads `.color` today, so this is a trap rather than a live bug: remove
-  it, or replace it with an inline pack helper. The 0–63 channel range is right for the VGA DAC and should
-  stay, but a DOS port cannot hand this array to port `0x3C9` unconverted — worth knowing before Tier 7.
+  inside the 18-bit window. Nothing reads `.color` today, so this is a trap rather than a live bug.
+
+  The fix is a plain three-byte struct:
+
+  ```c
+  typedef struct KEK_palette_item {
+      uint8_t r, g, b;   /* 0..63 — VGA DAC range */
+  } KEK_palette_item;
+  ```
+
+  `sizeof` is then 3 *by the standard* rather than by observation — every member is char-aligned, so no
+  padding is possible. That leaves the category of implementation-defined layout entirely, which the
+  bitfield version never could. 256 entries become exactly 768 bytes: the VGA palette block, so a DOS port
+  writes it with `rep outsb` straight to port `0x3C9` with no repacking. Scope: 25 `.channels` sites
+  (6 in [kek_palette.c](kek/kek_palette.c), 1 in [main_sdl.c](platform/main_sdl.c), 18 in
+  [palette_grid.h](tools/kek_editor/components/palette_grid.h)), the 64-line default table whose fourth
+  initializer is always a literal `0`, and static asserts on `sizeof == 3` and `sizeof(item[256]) == 768`.
+  `needs a decision`: keep the `.channels.r` spelling by nesting the struct, or flatten to `palette[i].r`
+  and touch those 25 sites. Worth doing in the same commit as the overflow above — same file, same
+  confusion between colours and indices.
 
 - **No compiler warnings are enabled.** [CMakeLists.txt](CMakeLists.txt) has no `target_compile_options` at
   all. Add `-Wall -Wextra -Wpedantic` (`/W4` on MSVC) to the engine, the game and the platform layer, then
@@ -134,6 +151,22 @@ roughly 20 KB of actual data.
   slots with one static arena allocated sequentially with marks — the Quake `Hunk_Alloc` model, reset on
   level change. This is still "no dynamic allocation" in the sense the project means: a bump allocator
   over a static array, deterministic, no free list, no fragmentation.
+
+  The expensive part is the API, not the allocator. `kek_model_create(e)` hands back a worst-case slot;
+  an arena has to know the size up front, so it becomes `kek_model_create(e, verts, faces, flags)`. And
+  `kek_model_destroy` has no meaning in a bump allocator — there are 14 calls to the destroy functions,
+  6 in [kek_file_model.c](kek/kek_file_model.c), 6 in [kek_file_image.c](kek/kek_file_image.c), 2 in the
+  game. What rescues it: almost all of them are LIFO by construction, since the loaders free exactly what
+  they just built on an error path. So a two-ended arena with marks works — permanent data (default cube
+  and texture, fonts) from the low end, per-level data from the high end, released wholesale on level
+  change, plus `kek_arena_mark()`/`kek_arena_release(mark)`. `destroy` genuinely frees when the block is
+  the most recent allocation, which covers every loader error path without touching their logic, and
+  otherwise just invalidates the handle until the next reset. Handles with generation counters stay, and
+  matter *more* under an arena, not less: they are the only thing that turns a use-after-release into a
+  detectable error instead of a corrupted triangle three weeks later.
+
+  Sequence: the pool tests from Tier 0 come first. Swapping the allocator underneath this without them is
+  how that corrupted triangle happens.
 - **Normals are the largest array in the engine and nothing reads them.** `KEK_model_face_normal` is
   3 × `KEK_FVec3` = 36 bytes per face, 36,864 bytes per slot — 42% of a model — and `kek_3d_draw_model`
   never touches them. KMF already stores them indexed (`KEK_FileModel_FaceVertex.normal`) and the loader
@@ -228,5 +261,7 @@ rendering is a single hardcoded `kek_3d_draw_model` call.
   layout. Build with DJGPP. Other platform layers per the README's "as many platforms as possible"; SDL3
   is the only one so far.
 - **Scripts**: no `requirements.txt` (Pillow is needed), no round-trip tests for `obj_to_kmf` or
-  `bmp_to_kif`.
+  `bmp_to_kif`. [palette_to_bmp.py](scripts/palette_to_bmp.py) also embeds its own copy of the default
+  palette as a string and parses it with a regex, so the table has two sources of truth already —
+  independent of the layout change in Tier 0, but it will need the same edit.
 - **Docs**: CONTRIBUTING.

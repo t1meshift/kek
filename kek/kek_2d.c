@@ -310,7 +310,6 @@ void kek_2d_circle(KEK_engine* engine, KEK_IVec2 p, uint16_t radius, uint8_t col
     // Jesko's method, idk if this even works correct
     int t1, t2, mx, my;
     t1 = radius / 16;
-    t2 = 0;
     mx = radius;
     my = 0;
     while (mx >= my) {
@@ -333,7 +332,6 @@ void kek_2d_circle_border(KEK_engine* engine, KEK_IVec2 p, uint16_t radius, uint
     // Jesko's method for the border, idk if this even works correct
     int t1, t2, mx, my;
     t1 = radius / 16;
-    t2 = 0;
     mx = radius;
     my = 0;
     while (mx >= my) {

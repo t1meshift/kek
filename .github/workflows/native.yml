@@ -94,8 +94,9 @@ jobs:
   tidy:
     name: clang-tidy
     runs-on: ubuntu-latest
-    # Non-blocking on purpose — see the note in .clang-tidy. Flip this off, and
-    # WarningsAsErrors on, once the tree is clean.
+    # The tree is clean against the configured set, but this stays non-blocking:
+    # the runner's clang-tidy version is not pinned, and a newer one adding a
+    # check to bugprone-* should not stop a merge. See the note in .clang-tidy.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4

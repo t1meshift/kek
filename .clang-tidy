@@ -4,8 +4,11 @@
 # leading -* and an explicit opt-in list, then a list of subtractions with a
 # reason for each.
 #
-# Non-blocking for now: the native CI workflow runs this as a separate job that
-# is allowed to fail. Flip WarningsAsErrors to '*' once the tree is clean.
+# The tree is clean against this set. CI still runs it as a continue-on-error
+# job, because the runner's clang-tidy version drifts and a newer one can add
+# checks to bugprone-* or cert-* overnight. Making it blocking is two lines —
+# WarningsAsErrors: '*' here and dropping continue-on-error in native.yml —
+# and is a call about how much version drift should be allowed to stop a merge.
 Checks: >
   -*,
   bugprone-*,
@@ -42,8 +45,17 @@ Checks: >
 #
 # cert-err33-c stays on deliberately: it flags ignored fseek/fread returns in
 # the asset provider, which is exactly the class of defect this project cares
-# about. It also flags snprintf, which is noise — that is the trade.
+# about. Where dropping a result really is right — fclose on a read-only
+# stream, snprintf into a debug overlay — say so with a (void) cast; see
+# AllowCastToVoid below.
 
 HeaderFilterRegex: '.*/(kek|game|platform)/.*\.h$'
 
 WarningsAsErrors: ''
+
+CheckOptions:
+  # An explicit (void) is the C way of writing "I know, and I do not care
+  # here". Without this the only way to quiet cert-err33-c is a NOLINT comment,
+  # which says the same thing but to the linter instead of to the reader.
+  - key: bugprone-unused-return-value.AllowCastToVoid
+    value: 'true'

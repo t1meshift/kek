@@ -17,7 +17,7 @@ int main(int argc, char* argv[]) {
     SDL_Renderer* renderer;
     SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     if (!SDL_CreateWindowAndRenderer("kek_editor", 1280, 800, window_flags, &window, &renderer)) {
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", SDL_GetError(), NULL);
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", SDL_GetError(), nullptr);
         return 1;
     }
 

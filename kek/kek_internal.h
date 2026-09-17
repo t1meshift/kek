@@ -17,12 +17,16 @@ That is the whole point of them, and it is also why they have no business
 in the public header: an out-of-range x or y writes wherever it lands.
 */
 
+/* The (size_t) casts are on the row offset, not decoration: y * e->w is an int
+   multiplication that only then widens to an index. Harmless at 320x200, but
+   kek_flush_buffers next door already spells it out, and the two should agree. */
+
 static inline void kek_blit(KEK_engine* e, uint16_t x, uint16_t y, uint8_t pixel) {
-    e->fb[y * e->w + x] = pixel;
+    e->fb[(size_t)y * e->w + x] = pixel;
 }
 
 static inline void kek_line(KEK_engine* e, uint16_t y, uint16_t x0, uint16_t x1, uint8_t pixel) {
-    memset(e->fb + (y * e->w) + x0, pixel, x1 - x0 + 1);
+    memset(e->fb + (size_t)y * e->w + x0, pixel, (size_t)(x1 - x0) + 1);
 }
 
 #endif // KEK_INTERNAL_H

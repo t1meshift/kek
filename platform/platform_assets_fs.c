@@ -111,11 +111,11 @@ static int _fs_asset_stat(KEK_AssetProvider* provider, const char* path, KEK_Ass
     }
 
     if (!_fs_asset_query_size(file, &out_info->size)) {
-        fclose(file);
+        (void)fclose(file);
         return 0;
     }
 
-    fclose(file);
+    (void)fclose(file);
     return 1;
 }
 
@@ -143,12 +143,12 @@ static int _fs_asset_open(KEK_AssetProvider* provider, const char* path, KEK_Ass
     }
 
     if (!_fs_asset_query_size(file, &size)) {
-        fclose(file);
+        (void)fclose(file);
         return 0;
     }
 
     if (fseek(file, 0, SEEK_SET) != 0) {
-        fclose(file);
+        (void)fclose(file);
         return 0;
     }
 
@@ -230,7 +230,7 @@ static void _fs_asset_close(KEK_AssetStream* stream) {
 
     state = _fs_asset_stream_state(stream);
     if (state->file) {
-        fclose(state->file);
+        (void)fclose(state->file);
     }
     memset(state, 0, sizeof(*state));
 }

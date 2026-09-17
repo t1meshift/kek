@@ -5,8 +5,12 @@
 #include "kek_math.h"
 #include "kek_pool.h"
 
+/* A zero-size read is a failure, not a trivially satisfied success: kek_asset_read
+   returns 0 for a stream with no vtable, and 0 == 0 would report that out_data
+   had been filled. Every caller already guards its count, so this refuses a call
+   that should not happen rather than changing one that does. */
 static int kek_file_model_read_exact(KEK_AssetStream* stream, void* out_data, size_t size) {
-    return kek_asset_read(stream, out_data, size) == size;
+    return size > 0 && kek_asset_read(stream, out_data, size) == size;
 }
 
 static KEK_FVec3 kek_file_model_subtract(KEK_FVec3 a, KEK_FVec3 b) {

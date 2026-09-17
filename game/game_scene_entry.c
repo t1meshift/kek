@@ -159,7 +159,7 @@ void GAME_EntryScene_render(KEK_scene* scene, KEK_engine* e) {
 
     for (int i = 0; i < 16; ++i) {
         char kal[8] = {0,};
-        snprintf(kal, 7, "%d", i);
+        (void)snprintf(kal, 7, "%d", i);
         kek_2d_rect(e, (KEK_IVec2) {0, i * 8}, (KEK_IVec2) { 8, (i + 1) * 8 }, i);
         kek_2d_text_5x8(e, &KEK_FONT_DEFAULT_5X8, (KEK_IVec2) {10, i*8}, kal, 15);
     }
@@ -190,7 +190,7 @@ void GAME_EntryScene_render(KEK_scene* scene, KEK_engine* e) {
     }
 
     char buf[128];
-    snprintf(
+    (void)snprintf(
         buf,
         128,
         "x: %.02f\ny: %.02f\nz: %.02f",

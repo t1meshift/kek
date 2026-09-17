@@ -246,14 +246,23 @@ void kek_3d_blit_vertex(KEK_engine* engine, KEK_3D_ProjectedVertex vertex, uint8
 }
 
 /* Clip a triangle in view space against z = near_plane (Sutherland-Hodgman).
- * Returns the number of output vertices: 0 (all clipped), 3, or 4. */
+ * Returns the number of output vertices: 0 (all clipped), 3, or 4.
+ *
+ * Four is arithmetic, not a guess: a convex polygon crosses a plane at most
+ * twice, so the worst case is two kept vertices plus two intersections. But
+ * the loop writes up to twice per edge and nothing in it enforces that bound,
+ * while out_v is a four-element array on the caller's stack — so the bound is
+ * checked rather than assumed. */
+#define KEK_3D_CLIP_NEAR_MAX_VERTS 4
+
 static int kek_3d_clip_near(
     KEK_FVec3 v[3], KEK_FVec2 uv[3], float near,
-    KEK_FVec3 out_v[4], KEK_FVec2 out_uv[4])
+    KEK_FVec3 out_v[KEK_3D_CLIP_NEAR_MAX_VERTS],
+    KEK_FVec2 out_uv[KEK_3D_CLIP_NEAR_MAX_VERTS])
 {
     int n = 0;
     int i;
-    for (i = 0; i < 3; ++i) {
+    for (i = 0; i < 3 && n < KEK_3D_CLIP_NEAR_MAX_VERTS; ++i) {
         KEK_FVec3 a = v[i], b = v[(i + 1) % 3];
         KEK_FVec2 ua = uv[i], ub = uv[(i + 1) % 3];
         int a_in = a.z > near, b_in = b.z > near;
@@ -261,7 +270,7 @@ static int kek_3d_clip_near(
             out_v[n] = a;
             out_uv[n++] = ua;
         }
-        if (a_in != b_in) {
+        if (a_in != b_in && n < KEK_3D_CLIP_NEAR_MAX_VERTS) {
             float t = (near - a.z) / (b.z - a.z);
             out_v[n].x  = a.x  + t * (b.x  - a.x);
             out_v[n].y  = a.y  + t * (b.y  - a.y);
@@ -316,8 +325,8 @@ void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FV
         char face_is_textured;
         KEK_FVec3 fv[3];
         KEK_FVec2 fuv[3];
-        KEK_FVec3 cv[4];
-        KEK_FVec2 cuv[4];
+        KEK_FVec3 cv[KEK_3D_CLIP_NEAR_MAX_VERTS];
+        KEK_FVec2 cuv[KEK_3D_CLIP_NEAR_MAX_VERTS];
         int cn, tri_count, t;
 
         face_uv = i < mdl->textures_count ? mdl->face_textures[i] : (KEK_model_face_uv) {

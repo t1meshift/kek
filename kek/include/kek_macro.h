@@ -15,9 +15,9 @@
     typedef char KEK_CONCAT(kek_static_assert_, __LINE__)[(cond) ? 1 : -1]
 
 #define KEK_SWAP(type, a, b) do { \
-type _kek_temp_ = a;              \
-a = b;                            \
-b = _kek_temp_;                   \
+    type kek_swap_temp_ = (a);    \
+    (a) = (b);                    \
+    (b) = kek_swap_temp_;         \
 } while (0)
 
 

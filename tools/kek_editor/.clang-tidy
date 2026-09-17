@@ -1,0 +1,20 @@
+# The editor is C++20 against Dear ImGui, so it gets the root set plus a small
+# modernize subset. Deliberately no readability-* : ImGui's idioms are what they
+# are, and the editor reads better following them than fighting them.
+InheritParentConfig: true
+
+Checks: >
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-using,
+  modernize-use-bool-literals,
+  modernize-redundant-void-arg,
+  -portability-avoid-pragma-once
+
+# The editor headers use #pragma once throughout, on purpose — they are
+# header-only C++ that only this target includes. The engine's public headers
+# keep real include guards, where portability actually matters.
+
+HeaderFilterRegex: '.*/tools/kek_editor/.*\.h$'
+
+WarningsAsErrors: ''

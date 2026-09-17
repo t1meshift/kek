@@ -1,0 +1,49 @@
+# Narrow and strict: checks that find defects, not checks that have opinions
+# about style. The engine is C99 with no dynamic allocation, so most of what
+# clang-tidy ships is either inapplicable or actively wrong here — hence the
+# leading -* and an explicit opt-in list, then a list of subtractions with a
+# reason for each.
+#
+# Non-blocking for now: the native CI workflow runs this as a separate job that
+# is allowed to fail. Flip WarningsAsErrors to '*' once the tree is clean.
+Checks: >
+  -*,
+  bugprone-*,
+  clang-analyzer-*,
+  portability-*,
+  cert-*,
+  -bugprone-narrowing-conversions,
+  -bugprone-reserved-identifier,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-assignment-in-if-condition,
+  -bugprone-switch-missing-default-case,
+  -cert-dcl37-c,
+  -cert-dcl51-cpp,
+  -cert-int09-c,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling
+
+# Why each of those is off:
+#
+# bugprone-narrowing-conversions — a software renderer converts between int and
+#   float on nearly every line, on purpose. ~60 hits, no signal. Revisit when
+#   the fixed-point transition lands; the check may earn its keep then.
+# bugprone-reserved-identifier (and its cert-dcl37-c / cert-dcl51-cpp aliases) —
+#   flags every existing _kek_* and _GAME_* file-scope static. Leading
+#   underscores at file scope are technically reserved; renaming them is its own
+#   change, not something to smuggle in behind a linter.
+# bugprone-easily-swappable-parameters — fires on every (x, y) and (w, h) in a
+#   rasterizer.
+# bugprone-assignment-in-if-condition, bugprone-switch-missing-default-case —
+#   style calls, not defects.
+# cert-int09-c — wants all-or-nothing explicit enum values; GAME_SceneTag is
+#   deliberately "first one pinned, rest sequential".
+# clang-analyzer-security.insecureAPI...  — wants memcpy_s/memset_s. Annex K is
+#   optional, glibc does not have it, and neither will DJGPP.
+#
+# cert-err33-c stays on deliberately: it flags ignored fseek/fread returns in
+# the asset provider, which is exactly the class of defect this project cares
+# about. It also flags snprintf, which is noise — that is the trade.
+
+HeaderFilterRegex: '.*/(kek|game|platform)/.*\.h$'
+
+WarningsAsErrors: ''

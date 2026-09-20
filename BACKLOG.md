@@ -3,6 +3,8 @@
 What is missing, why it matters and in what order to do it. Tiers are priorities,
 not schedules: Tier 0 is the current focus, everything below it is ordered by what
 unblocks what. Items marked `needs a decision` are waiting on a call, not on work.
+Finished items move to [Done](#done) at the bottom, one line each plus the commit
+that did it — the reasoning lives in the commit message rather than twice here.
 
 ## Settled decisions
 
@@ -239,3 +241,32 @@ rendering is a single hardcoded `kek_3d_draw_model` call.
   today — the first two were checked byte for byte when the item shrank to three channels — but nothing
   keeps them agreeing. Generate the Python copies from the C table, or the C table from a data file.
 - **Docs**: CONTRIBUTING.
+
+## Done
+
+Ordered oldest first. Each line is what the item was, not what replaced it; `git show`
+on the hash has the reasoning, the measurements and what was verified.
+
+### Tier 0
+
+| | Was | Commit |
+| --- | --- | --- |
+| Licence | A public repository with a live demo and no statement of terms | `e1302c4` |
+| Palette layout | `KEK_palette_item` was a union whose `sizeof` was 8, not 4, with a lossy `color:18` member; a 256-entry palette cost 2 KB and its layout was implementation-defined. Now a plain three-byte struct, 768 bytes for 256 entries — the VGA palette block — held by static asserts | `9bfb38b` |
+| Shading palette overflow | `kek_set_shading_palette()` copied `256 * LEVELS * sizeof(KEK_palette_item)` into a `uint8_t[256 * LEVELS]`, overflowing it eightfold. The parameter is `const uint8_t*` now: a shading palette is a table of indices | `9bfb38b` |
+| Leaked texture slot | `kek_file_model_load()` dropped the handle from `kek_file_image_load()` and kept the raw `KEK_texture*`, so the slot could never be released — the 16-slot pool ran out on the 15th load. `KEK_model` holds a handle and an `owns_texture` flag | `c8a20bf` |
+| `kek_blit`/`kek_line` in the public header | Both are unclipped fast paths and had no business in `kek.h`. Moved to `kek/kek_internal.h` as `static inline` | `cad397a` |
+| Compiler warnings | `CMakeLists.txt` had no `target_compile_options` at all. `-Wall -Wextra -Wpedantic` (`/W4` on MSVC) everywhere but vendored ImGui, behind `KEK_WERROR`; all 370 warnings cleared | `c2f5679` |
+| `.clang-tidy` | The file was zero bytes. A narrow set with a reason recorded for every subtraction; the tree is clean against it | `ab7deb3` |
+| Native CI | Only the web demo was built. Linux GCC, Linux Clang and Windows MSVC, plus a non-blocking clang-tidy job | `b16f62b` |
+
+### Found on the way, not from a backlog item
+
+| | Was | Commit |
+| --- | --- | --- |
+| Null scene dereference | `_kek_apply_scene_switch` reached `e->scene->exit` unguarded, so a `kek_request_scene()` before the first `kek_set_scene()` was a segfault on the next `kek_update()` | `a8e6020` |
+| Near-plane clip bound | `kek_3d_clip_near` relied on an unenforced four-vertex bound while writing into a four-element array on the caller's stack. Four is provable; it is checked now | `443b7a4` |
+| Zero-size read reported success | `kek_file_model_read_exact` returned true for a zero-size read on a stream with no vtable | `443b7a4` |
+| `kek_2d_rect_border` | Drew the same diagonal four times instead of the four edges | `d4776d4` |
+| Unclipped 2D primitives | `kek_2d_circle`, `kek_2d_circle_border` and `kek_2d_rect` handed unclipped coordinates to `kek_blit`/`kek_line`. Under ASan: a `negative-size-param` memset of -65455 bytes, a global-buffer-overflow and a SEGV. `kek_2d_span`/`kek_2d_point` are the clipping counterparts | `d4776d4` |
+| Undefined shift | `error << 1` in the Bresenham loop of `kek_2d_line`, where `error` is routinely negative | `d4776d4` |

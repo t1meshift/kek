@@ -58,17 +58,36 @@ static void kek_file_model_generate_normals(
     out_model->face_normals_count = faces_count;
 }
 
+/* A whole worst-case KMF is staged here before any of it reaches a pool slot,
+   because the file has to be validated — face indices against the vertex count,
+   UV indices against the UV count — before a slot is taken. At the pool's
+   1024-of-everything limits that is ~51 KB, and as locals it was ~51 KB of
+   stack: the single reason the browser build asked for -sSTACK_SIZE=1048576
+   against Emscripten's 64 KB default.
+
+   Static instead, which is what the rest of the engine does with its buffers
+   and costs nothing at runtime. Not reentrant, and does not need to be — the
+   one nested call is into kek_file_image_load for the texture, which has its
+   own storage and never comes back here. */
+static struct {
+    KEK_FileModel_Vertex vertices[KEK_POOL_MODEL_VERTS_MAX];
+    KEK_FileModel_Normal normals[KEK_POOL_MODEL_VERTS_MAX];
+    KEK_FileModel_UV uvs[KEK_POOL_MODEL_UVS_MAX];
+    KEK_FileModel_Face faces[KEK_POOL_MODEL_FACES_MAX];
+    char texture_name[256];
+} KEK_FILE_MODEL_SCRATCH;
+
 KEK_ModelHandle kek_file_model_load(KEK_engine *e, const char *path) {
     KEK_AssetInfo info;
     KEK_AssetStream stream;
     KEK_FileModel_Header hdr;
     KEK_ModelHandle model_handle;
     KEK_model* out_model;
-    KEK_FileModel_Vertex vertices[KEK_POOL_MODEL_VERTS_MAX];
-    KEK_FileModel_Normal normals[KEK_POOL_MODEL_VERTS_MAX];
-    KEK_FileModel_UV uvs[KEK_POOL_MODEL_UVS_MAX];
-    KEK_FileModel_Face faces[KEK_POOL_MODEL_FACES_MAX];
-    char texture_name[256];
+    KEK_FileModel_Vertex* vertices = KEK_FILE_MODEL_SCRATCH.vertices;
+    KEK_FileModel_Normal* normals = KEK_FILE_MODEL_SCRATCH.normals;
+    KEK_FileModel_UV* uvs = KEK_FILE_MODEL_SCRATCH.uvs;
+    KEK_FileModel_Face* faces = KEK_FILE_MODEL_SCRATCH.faces;
+    char* texture_name = KEK_FILE_MODEL_SCRATCH.texture_name;
     size_t texture_name_size;
 
     if (!e || !e->assets || !path) {
@@ -100,7 +119,8 @@ KEK_ModelHandle kek_file_model_load(KEK_engine *e, const char *path) {
 
     texture_name_size = hdr.texture_name_size;
     if (texture_name_size > 0) {
-        if (texture_name_size > sizeof(texture_name)) {
+        /* Not sizeof(texture_name): that is a pointer into the scratch now. */
+        if (texture_name_size > sizeof(KEK_FILE_MODEL_SCRATCH.texture_name)) {
             kek_asset_close(&stream);
             return KEK_MODEL_HANDLE_INVALID;
         }

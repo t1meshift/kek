@@ -244,9 +244,10 @@ if(EMSCRIPTEN)
   target_link_options(${GAME_NAME}_sdl PRIVATE
     "--embed-file" "${CMAKE_SOURCE_DIR}/assets@/assets"
     "--shell-file" "${KEK_WEB_SHELL}"
-    # kek_file_model_load() keeps a whole KMF's worth of vertices, normals, UVs
-    # and faces in locals — well past Emscripten's 64 KB default stack.
-    "-sSTACK_SIZE=1048576"
+    # The 1 MB -sSTACK_SIZE that used to be here was for kek_file_model_load(),
+    # which staged a whole KMF in ~51 KB of locals. That is a static scratch
+    # buffer now and the engine's largest frame is 672 bytes, so Emscripten's
+    # 64 KB default is plenty.
     # No allocation past startup, so the heap can be fixed instead of growable.
     "-sINITIAL_MEMORY=33554432"
     "-sALLOW_MEMORY_GROWTH=0"

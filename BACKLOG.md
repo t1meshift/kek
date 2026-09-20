@@ -38,17 +38,13 @@ These shape several items below, so they are recorded once here.
   `kek_texture_sample` is correct at the edges under both `CLAMP` and `REPEAT`, and near-plane clipping
   yields 0, 3 or 4 vertices. The 2D primitives have already been through exactly this exercise by hand —
   reversed rectangle corners and circles hanging off every edge, under ASan — and it found three
-  out-of-bounds writes. That pass should become a test rather than stay a thing that was done once.
+  out-of-bounds writes. `kek_2d_triangle` went through the same exercise in `349beae`, against a
+  guarded buffer, with triangles off each edge, degenerate ones, and one larger than the screen.
+  Both passes should become tests rather than stay things that were done once and thrown away.
 
 - **No in-memory `KEK_AssetProvider`.** Needed to exercise the parsers without touching the filesystem.
   The vtable is already defined in [kek_asset.h](kek/include/kek_asset.h); this belongs in the engine
   rather than in `platform/` — see Tier 1.
-
-- **The simulation step ignores real time.** `kek_update()` always passes `1000.f / target_fps`
-  ([kek.c#L119](kek/kek.c#L119)) and `SDL_AppIterate` spins on `SDL_Delay(1)`
-  ([main_sdl.c](platform/main_sdl.c)). Move to real dt with an upper clamp. Knock-on effect:
-  `GAME_EntryScene_render` derives its rotation from `ticks / target_fps`, which stops being time — it
-  needs accumulated seconds instead of a frame counter.
 
 - **No input state API.** The engine only delivers `key_down`/`key_up` events, so every scene keeps its own
   bitmask — see `_GAME_EntryScene_Movement` at
@@ -56,21 +52,14 @@ These shape several items below, so they are recorded once here.
   (current and previous frame, for edge detection) cost 128 bytes against the ~2.6 MB already in BSS, so
   static memory is not an argument against it. Mouse and gamepad later.
 
-- **~50 KB of stack in the model loader.** The locals at
-  [kek_file_model.c#L67](kek/kek_file_model.c#L67) are why the web build needs `-sSTACK_SIZE=1048576`.
-  Move them to a static scratch buffer, in keeping with the no-dynamic-allocation rule.
-
-- **On-disk layout rests on compiler padding.** `KEK_FileModel_Header` is read with a single
-  `read(sizeof(hdr))` and has to match `KMDL_HEADER_STRUCT = "<4sHHHHHHHBx"` in
-  [obj_to_kmf.py](scripts/obj_to_kmf.py). It does — both are 20 bytes — but nothing enforces it.
-  `KEK_STATIC_ASSERT_DECL` exists now and holds `KEK_palette_item` at 3 bytes; the KMF and KIF headers
-  still need the same treatment, and `docs/formats.md` still needs writing.
-
-- **`kek_2d_triangle` clamps where it should reject.** It clamps `xl` and `xr` into the viewport
-  independently ([kek_2d.c#L427](kek/kek_2d.c#L427)), so a triangle entirely off one side draws a
-  one-pixel column glued to that edge instead of nothing. `kek_2d_span` next door already does this
-  correctly; the triangle predates it and should go through it. Cosmetic, not a memory error — the
-  clamping keeps it in bounds.
+- **`kek_palette.c` does not compile outside the CMake build.** It reads
+  `KEK_PALETTE_SHADING_LEVELS` but reaches no include that defines it, so the `#ifndef` default in
+  [kek_config.h](kek/include/kek_config.h) never applies and only the `-D` from
+  [CMakeLists.txt](CMakeLists.txt) makes it build. It is the only file in `kek/` that fails
+  `gcc -fsyntax-only -Ikek/include` on its own; every other user of a config macro happens to reach
+  the header transitively. One `#include` fixes it, but the shape of the problem is that the defaults
+  are load-bearing only by luck of the include graph — the tests in this tier will compile these
+  files on their own terms and want them self-contained.
 
 - **Reserved identifiers throughout.** Every `_kek_*` and `_GAME_*` file-scope static claims a name the
   standard reserves. `bugprone-reserved-identifier` is switched off in [.clang-tidy](.clang-tidy) with
@@ -176,9 +165,6 @@ roughly 20 KB of actual data.
 - **The depth buffer is the single largest allocation.** 320×200×4 = 250 KB against 62.5 KB for the frame
   itself. Quantised `1/z` in `uint16` halves it and cuts memory traffic in the hot loop. Quake used a
   16-bit z-buffer at this resolution, and only for alias models.
-- **Resolution is hardcoded.** `KEK_BUFFER_WIDTH`/`KEK_BUFFER_HEIGHT` are `#define`s at
-  [kek.c#L9](kek/kek.c#L9) even though `e->w`/`e->h` are already struct fields. Move them to
-  `kek_config.h` with the other knobs — a prerequisite for any small target.
 - **Own transcendentals.** 28 libm calls across four files: `sinf`/`cosf` (15), `roundf` (5), `tanf` (2),
   `sqrtf`, `floorf`, `fabsf`. Table-driven replacements drop the libm dependency and, more importantly,
   make rendering bit-reproducible across toolchains — libm accuracy is not specified, unlike `+ - * /`
@@ -196,7 +182,7 @@ rendering is a single hardcoded `kek_3d_draw_model` call.
   flags}` and a draw pass over it, following the existing `KEK_ModelPool` pattern.
 - The `.klf` format, magic `KLVL`: header, model table (paths), instance table (transform plus model
   index), camera spawn. Same discipline as KMF — fixed-size records, bounds-checked, no allocation.
-  Specified in the same `docs/formats.md`.
+  Specified in [docs/formats.md](docs/formats.md), which has a stub section waiting for it.
 - `kek_file_level_load()`, tested through the in-memory provider from Tier 0.
 - An exporter in `scripts/`, from a level source or from the editor.
 - Collision and spatial queries — nothing makes a level walkable. AABBs and a ray cast against model
@@ -259,6 +245,16 @@ on the hash has the reasoning, the measurements and what was verified.
 | Compiler warnings | `CMakeLists.txt` had no `target_compile_options` at all. `-Wall -Wextra -Wpedantic` (`/W4` on MSVC) everywhere but vendored ImGui, behind `KEK_WERROR`; all 370 warnings cleared | `c2f5679` |
 | `.clang-tidy` | The file was zero bytes. A narrow set with a reason recorded for every subtraction; the tree is clean against it | `ab7deb3` |
 | Native CI | Only the web demo was built. Linux GCC, Linux Clang and Windows MSVC, plus a non-blocking clang-tidy job | `b16f62b` |
+| Fixed simulation step | `kek_update()` passed `1000/target_fps` whatever had happened, so a frame that took 80 ms still advanced by 33 and the game ran slow in proportion to how far behind it was. Real dt from the platform layer, clamped to `KEK_MAX_FRAME_MS` and NaN-proof; `SDL_AppIterate` sleeps the remainder instead of waking every millisecond. The game accumulates seconds rather than frames | `18b72f7` |
+| `kek_2d_triangle` clamped where it should reject | Off-screen spans collapsed onto the edge they fell off. Worse in y than recorded here: clamping `a.y`/`b.y` into range gave `ay == by == 0`, so a triangle at y = -300 drew a full 320-pixel row along the top. Both axes intersect now, spans go through `kek_2d_span` | `349beae` |
+| ~50 KB of stack in the model loader | A worst-case KMF was staged in locals: 51,712 bytes of frame against 672 for the next largest in the engine. Static scratch, 240 bytes of frame, and the browser build's `-sSTACK_SIZE=1048576` is gone | `acbcbb7` |
+| On-disk layout rested on compiler padding | The KMF and KIF headers matched their Python writers by coincidence. Size and every field offset asserted, plus the record types; `docs/formats.md` written | `3520df1` |
+
+### Tier 3
+
+| | Was | Commit |
+| --- | --- | --- |
+| Resolution hardcoded | `KEK_BUFFER_WIDTH`/`KEK_BUFFER_HEIGHT`/`KEK_TARGET_FPS` were `#define`s at the top of `kek.c`. In `kek_config.h` with the other knobs now, with CMake cache entries | `f99074d` |
 
 ### Found on the way, not from a backlog item
 
@@ -270,3 +266,4 @@ on the hash has the reasoning, the measurements and what was verified.
 | `kek_2d_rect_border` | Drew the same diagonal four times instead of the four edges | `d4776d4` |
 | Unclipped 2D primitives | `kek_2d_circle`, `kek_2d_circle_border` and `kek_2d_rect` handed unclipped coordinates to `kek_blit`/`kek_line`. Under ASan: a `negative-size-param` memset of -65455 bytes, a global-buffer-overflow and a SEGV. `kek_2d_span`/`kek_2d_point` are the clipping counterparts | `d4776d4` |
 | Undefined shift | `error << 1` in the Bresenham loop of `kek_2d_line`, where `error` is routinely negative | `d4776d4` |
+| `KEK_STATIC_ASSERT_DECL` collided with itself | It named its typedef after `__LINE__`, so two headers asserting on the same line number in one translation unit were a duplicate typedef — an error in C99, not a tolerated redeclaration. It would have broken on the second header that used it. Takes an explicit tag now | `3520df1` |

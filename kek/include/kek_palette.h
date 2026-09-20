@@ -16,8 +16,8 @@ typedef struct KEK_palette_item {
     uint8_t r, g, b; /* 0..63 — VGA DAC range */
 } KEK_palette_item;
 
-KEK_STATIC_ASSERT_DECL(sizeof(KEK_palette_item) == 3);
-KEK_STATIC_ASSERT_DECL(sizeof(KEK_palette_item[256]) == 768);
+KEK_STATIC_ASSERT_DECL(palette_item_size, sizeof(KEK_palette_item) == 3);
+KEK_STATIC_ASSERT_DECL(palette_block_size, sizeof(KEK_palette_item[256]) == 768);
 
 extern KEK_palette_item KEK_DEFAULT_PALETTE[256];
 

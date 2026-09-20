@@ -28,6 +28,7 @@ typedef struct App {
     KEK_engine engine;
     uint32_t palette[256]; /* the engine's 18-bit palette, widened to RGBX8888 */
     uint64_t next_frame_ticks;
+    uint64_t last_update_ticks;
 } App;
 
 static App APP;
@@ -111,25 +112,32 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
                                      SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
 
     app->next_frame_ticks = SDL_GetTicks();
+    app->last_update_ticks = app->next_frame_ticks;
     return SDL_APP_CONTINUE;
 }
 
 SDL_AppResult SDL_AppIterate(void* appstate) {
     App* app = (App*)appstate;
     uint64_t ticks = SDL_GetTicks();
+    float dt;
 
-    /* kek_update() advances by a fixed 1000/target_fps regardless of real time,
-       so the frame gate below is what actually sets the simulation rate. */
+    /* The gate is pacing, not the clock. It aims at target_fps; how long the
+       frame took is measured below and handed to kek_update(), so overshooting
+       the gate slows the frame rate rather than the simulation. */
     if (ticks < app->next_frame_ticks) {
 #ifndef __EMSCRIPTEN__
-        /* The browser paces the callback for us; native builds would spin. */
-        SDL_Delay(1);
+        /* Sleep out the whole remainder instead of waking every millisecond to
+           re-read the clock; the browser paces the callback for us. */
+        SDL_Delay((uint32_t)(app->next_frame_ticks - ticks));
 #endif
         return SDL_APP_CONTINUE;
     }
     app->next_frame_ticks = ticks + 1000 / app->engine.target_fps;
 
-    kek_update(&app->engine);
+    dt = (float)(ticks - app->last_update_ticks);
+    app->last_update_ticks = ticks;
+
+    kek_update(&app->engine, dt);
     kek_render(&app->engine);
     app_present(app);
 

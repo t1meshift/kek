@@ -40,7 +40,7 @@ static void _GAME_EntryScene_reset(GAME_EntryScene* s) {
         .tag = GAME_TAG_SCENE_ENTRY
     };
     s->camera = KEK_DEFAULT_CAMERA;
-    s->ticks = 0;
+    s->elapsed = 0.f;
     s->movement = MOVE_NONE;
     s->model = KEK_MODEL_HANDLE_INVALID;
     s->texture = KEK_TEXTURE_HANDLE_INVALID;
@@ -119,6 +119,7 @@ void GAME_EntryScene_update(KEK_scene* scene, KEK_engine* e, float dt) {
 
     const float move_speed = 1.f;
     const float rotate_speed = 3.1415f / 4.f;
+    const float dt_s = dt / 1000.f; /* dt arrives in milliseconds */
 
     move_right = 1.f * ((m & MOVE_RIGHT) != 0) + -1.f * ((m & MOVE_LEFT) != 0);
     move_up = 1.f * ((m & MOVE_UP) != 0) + -1.f * ((m & MOVE_DOWN) != 0);
@@ -140,21 +141,20 @@ void GAME_EntryScene_update(KEK_scene* scene, KEK_engine* e, float dt) {
     move_vec.y = move_up;
     move_vec.z = right.z * move_right + forward.z * move_forward;
     kek_normalize_fvec3(&move_vec);
-    kek_mul_fvec3_n(&move_vec, move_speed * dt / 1000.f);
+    kek_mul_fvec3_n(&move_vec, move_speed * dt_s);
     kek_add_fvec3(&s->camera.position, &move_vec);
 
     rotate_vec.x = 1.f * ((m & ROTATE_UP) != 0) + -1.f * ((m & ROTATE_DOWN) != 0);
     rotate_vec.y = 1.f * ((m & ROTATE_LEFT) != 0) + -1.f * ((m & ROTATE_RIGHT) != 0);
     kek_normalize_fvec3(&rotate_vec);
-    kek_mul_fvec3_n(&rotate_vec, rotate_speed * dt / 1000.f);
+    kek_mul_fvec3_n(&rotate_vec, rotate_speed * dt_s);
     kek_add_fvec3(&s->camera.rotation, &rotate_vec);
 
-    ++s->ticks;
+    s->elapsed += dt_s;
 }
 
 void GAME_EntryScene_render(KEK_scene* scene, KEK_engine* e) {
     GAME_EntryScene* s = (GAME_EntryScene*)scene;
-    uint32_t ticks = s->ticks;
     KEK_model* mdl = kek_model_get(e, s->model);
 
     for (int i = 0; i < 16; ++i) {
@@ -164,7 +164,9 @@ void GAME_EntryScene_render(KEK_scene* scene, KEK_engine* e) {
         kek_2d_text_5x8(e, &KEK_FONT_DEFAULT_5X8, (KEK_IVec2) {10, i*8}, kal, 15);
     }
 
-    float rotate = 3.1415f * (float)ticks / 5.f / (float)e->target_fps;
+    /* One turn every ten seconds, from accumulated seconds rather than a frame
+       count over target_fps — which stopped being time once dt became real. */
+    float rotate = 3.1415f * s->elapsed / 5.f;
     
     if (mdl) {
             kek_3d_draw_model(e, mdl, &s->camera, (KEK_FVec3) {

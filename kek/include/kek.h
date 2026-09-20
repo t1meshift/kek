@@ -60,7 +60,10 @@ void kek_flush_buffers(KEK_engine* engine);
 void kek_key_down(KEK_engine* engine, uint16_t key);
 void kek_key_up(KEK_engine* engine, uint16_t key);
 
-void kek_update(KEK_engine* engine);
+/* dt is the time that actually passed since the previous call, in
+   milliseconds — the platform layer measures it. Clamped to KEK_MAX_FRAME_MS
+   before it reaches the scene. */
+void kek_update(KEK_engine* engine, float dt);
 void kek_render(KEK_engine* engine);
 
 #ifdef __cplusplus

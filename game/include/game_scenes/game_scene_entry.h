@@ -13,7 +13,7 @@ typedef struct GAME_EntryScene {
     KEK_ModelHandle model;
     KEK_TextureHandle texture;
     uint16_t movement;
-    uint32_t ticks;
+    float elapsed; /* seconds since the scene was entered */
 } GAME_EntryScene;
 
 GAME_EntryScene GAME_EntryScene_init(void);

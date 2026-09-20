@@ -109,10 +109,21 @@ static void _kek_apply_scene_switch(KEK_engine* e) {
     }
 }
 
-void kek_update(KEK_engine* e) {
-    KEK_scene* s = e->scene;
+void kek_update(KEK_engine* e, float dt) {
+    KEK_scene* s;
+
+    /* Written as a rejection rather than `dt < 0.f` so a NaN — which compares
+       false against everything — lands on 0 instead of passing straight through
+       into the scene's positions. */
+    if (!(dt > 0.f)) {
+        dt = 0.f;
+    } else if (dt > KEK_MAX_FRAME_MS) {
+        dt = KEK_MAX_FRAME_MS;
+    }
+
+    s = e->scene;
     if (s && s->update) {
-        s->update(s, e, 1000.f / (float)e->target_fps);
+        s->update(s, e, dt);
     }
 
     _kek_apply_scene_switch(e);

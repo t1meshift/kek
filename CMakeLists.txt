@@ -69,6 +69,9 @@ else()
   set(KEK_IMGUI_DIR "${KEK_IMGUI_LOCAL_DIR}")
 endif()
 
+set(KEK_BUFFER_WIDTH 320 CACHE STRING "Framebuffer width in pixels")
+set(KEK_BUFFER_HEIGHT 200 CACHE STRING "Framebuffer height in pixels")
+set(KEK_TARGET_FPS 30 CACHE STRING "Frames per second the platform layer paces to")
 set(KEK_MODEL_POOL_CAPACITY 16 CACHE STRING "Max pooled models")
 set(KEK_TEXTURE_POOL_CAPACITY 16 CACHE STRING "Max pooled textures")
 set(KEK_POOL_MODEL_VERTS_MAX 1024 CACHE STRING "Max vertices per pooled model")
@@ -161,6 +164,9 @@ target_include_directories(kek PUBLIC
   kek/include/
 )
 target_compile_definitions(kek PUBLIC
+  KEK_BUFFER_WIDTH=${KEK_BUFFER_WIDTH}u
+  KEK_BUFFER_HEIGHT=${KEK_BUFFER_HEIGHT}u
+  KEK_TARGET_FPS=${KEK_TARGET_FPS}u
   KEK_MODEL_POOL_CAPACITY=${KEK_MODEL_POOL_CAPACITY}
   KEK_TEXTURE_POOL_CAPACITY=${KEK_TEXTURE_POOL_CAPACITY}
   KEK_POOL_MODEL_VERTS_MAX=${KEK_POOL_MODEL_VERTS_MAX}

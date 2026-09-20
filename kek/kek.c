@@ -6,10 +6,6 @@
 #include "kek_palette.h"
 #include "kek_config.h"
 
-#define KEK_BUFFER_WIDTH 320
-#define KEK_BUFFER_HEIGHT 200
-#define KEK_TARGET_FPS 30
-
 static uint8_t KEK_FRAMEBUFFER[KEK_BUFFER_WIDTH * KEK_BUFFER_HEIGHT];
 static float KEK_DEPTHBUFFER[KEK_BUFFER_WIDTH * KEK_BUFFER_HEIGHT];
 static KEK_palette_item KEK_PALETTE[256];

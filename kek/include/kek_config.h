@@ -1,6 +1,22 @@
 #ifndef KEK_CONFIG_H
 #define KEK_CONFIG_H
 
+/* The framebuffer is 320x200 by default because that is VGA mode 13h: 256
+   colours, one byte per pixel, exactly what KEK_engine.fb already is. A target
+   with a different screen overrides these; everything downstream reads
+   KEK_engine.w/.h rather than the macros. */
+#ifndef KEK_BUFFER_WIDTH
+#define KEK_BUFFER_WIDTH 320u
+#endif
+
+#ifndef KEK_BUFFER_HEIGHT
+#define KEK_BUFFER_HEIGHT 200u
+#endif
+
+#ifndef KEK_TARGET_FPS
+#define KEK_TARGET_FPS 30u
+#endif
+
 #ifndef KEK_MODEL_POOL_CAPACITY
 #define KEK_MODEL_POOL_CAPACITY 8u
 #endif

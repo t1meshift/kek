@@ -16,7 +16,7 @@ Right now, it has 4 components:
 
 ## Roadmap
 
-The engine targets a Pentium and should still run on a 486, which settles a few things — fixed-point arithmetic among them. The current focus is the foundation rather than features: tests, a native CI build, compiler warnings, and a handful of defects worth fixing before anything is built on top. Levels, lighting and a working editor come after that.
+The engine targets a Pentium and should still run on a 486, which settles a few things — fixed-point arithmetic among them. The current focus is the foundation rather than features. Warnings, clang-tidy and a native CI build are in place, and the defects they turned up are fixed; what the foundation still lacks is a test suite, which most of the rest of the work is waiting on. Levels, lighting and a working editor come after that.
 
 [BACKLOG.md](BACKLOG.md) has the whole list, ordered by what unblocks what.
 

@@ -20,69 +20,30 @@ These shape several items below, so they are recorded once here.
 
 ## Tier 0 — Foundation
 
-- **No LICENSE file.** A public repository with a live demo and no statement of terms. All rights reserved.
-
-- **`kek_set_shading_palette()` overflows its destination by 8×.** [kek.c#L50](kek/kek.c#L50) copies
-  `256 * KEK_PALETTE_SHADING_LEVELS * sizeof(KEK_palette_item)` — 8192 bytes — into `KEK_SHADING_PALETTE`,
-  which is `uint8_t[256 * KEK_PALETTE_SHADING_LEVELS]`, 1024 bytes. Latent only because nothing calls the
-  function; it is declared in the public header. The root cause is a type error: a shading palette is a
-  table of palette *indices*, so the parameter should be `const uint8_t*` and the size should carry no
-  `sizeof(KEK_palette_item)` at all. Exactly the class of defect the tests below exist to catch.
-
-- **`KEK_palette_item` does not lay out the way the code reads.** `sizeof` is 8, not 4: each 6-bit channel
-  gets its own byte and five bytes are padding, so a 256-entry palette costs 2 KB. The `color:18` union
-  member is lossy — writing `b = 63` reads back as `0x30000`, because only the low two bits of `b` fall
-  inside the 18-bit window. Nothing reads `.color` today, so this is a trap rather than a live bug.
-
-  The fix is a plain three-byte struct:
-
-  ```c
-  typedef struct KEK_palette_item {
-      uint8_t r, g, b;   /* 0..63 — VGA DAC range */
-  } KEK_palette_item;
-  ```
-
-  `sizeof` is then 3 *by the standard* rather than by observation — every member is char-aligned, so no
-  padding is possible. That leaves the category of implementation-defined layout entirely, which the
-  bitfield version never could. 256 entries become exactly 768 bytes: the VGA palette block, so a DOS port
-  writes it with `rep outsb` straight to port `0x3C9` with no repacking. Scope: 25 `.channels` sites
-  (6 in [kek_palette.c](kek/kek_palette.c), 1 in [main_sdl.c](platform/main_sdl.c), 18 in
-  [palette_grid.h](tools/kek_editor/components/palette_grid.h)), the 64-line default table whose fourth
-  initializer is always a literal `0`, and static asserts on `sizeof == 3` and `sizeof(item[256]) == 768`.
-  `needs a decision`: keep the `.channels.r` spelling by nesting the struct, or flatten to `palette[i].r`
-  and touch those 25 sites. Worth doing in the same commit as the overflow above — same file, same
-  confusion between colours and indices.
-
-- **No compiler warnings are enabled.** [CMakeLists.txt](CMakeLists.txt) has no `target_compile_options` at
-  all. Add `-Wall -Wextra -Wpedantic` (`/W4` on MSVC) to the engine, the game and the platform layer, then
-  spend a pass clearing what falls out.
-
-- **`.clang-tidy` is empty** (0 bytes). Fill it with a narrow, strict set — `bugprone-*`,
-  `clang-analyzer-*`, `portability-*`, `cert-*` — and give `tools/kek_editor/` its own config with a
-  subset of `modernize-*`. Non-blocking in CI first, blocking once clean.
-
 - **No tests.** The engine is full of pure, trivially testable functions:
   [kek_math.c](kek/kek_math.c) (`kek_mat3_from_euler`, `kek_normalize_fvec3`, `kek_area_triangle_signed`),
-  [kek_palette.c](kek/kek_palette.c) (`kek_palette_nearest_color`, `kek_palette_calculate_shading`, and the
-  layout questions above), `kek_2d_clip_line` at [kek_2d.c#L10](kek/kek_2d.c#L10),
-  [kek_pool.c](kek/kek_pool.c) (handle encoding, generation reuse, refusal past capacity), and the
-  [KMF](kek/kek_file_model.c) and [KIF](kek/kek_file_image.c) parsers against truncated and malformed input.
+  [kek_palette.c](kek/kek_palette.c) (`kek_palette_nearest_color`, `kek_palette_calculate_shading`),
+  `kek_2d_clip_line` at [kek_2d.c#L11](kek/kek_2d.c#L11),
+  [kek_pool.c](kek/kek_pool.c) (handle encoding, generation reuse, refusal past capacity, and the
+  `owns_texture` rule — a clone shares a model's texture handle but never its ownership), and the
+  [KMF](kek/kek_file_model.c) and [KIF](kek/kek_file_image.c) parsers against truncated and malformed
+  input. This is now the only thing left in this tier that the rest of the tier was waiting on, and the
+  arena in Tier 2 must not be attempted before it.
 
 - **Rendering is testable without golden images.** `KEK_engine.fb` and `.db` are pointers, so a test can
   supply its own buffer with guard bytes around it and assert the things that do not depend on float:
   the rasterizer never writes outside the frame, the depth test rejects what is further away,
   `kek_texture_sample` is correct at the edges under both `CLAMP` and `REPEAT`, and near-plane clipping
-  yields 0, 3 or 4 vertices.
+  yields 0, 3 or 4 vertices. The 2D primitives have already been through exactly this exercise by hand —
+  reversed rectangle corners and circles hanging off every edge, under ASan — and it found three
+  out-of-bounds writes. That pass should become a test rather than stay a thing that was done once.
 
 - **No in-memory `KEK_AssetProvider`.** Needed to exercise the parsers without touching the filesystem.
   The vtable is already defined in [kek_asset.h](kek/include/kek_asset.h); this belongs in the engine
   rather than in `platform/` — see Tier 1.
 
-- **CI builds the web demo only** ([web-demo.yml](.github/workflows/web-demo.yml)). Add a native workflow:
-  Linux GCC and Clang, Windows MSVC, warnings as errors, CTest.
-
 - **The simulation step ignores real time.** `kek_update()` always passes `1000.f / target_fps`
-  ([kek.c#L122](kek/kek.c#L122)) and `SDL_AppIterate` spins on `SDL_Delay(1)`
+  ([kek.c#L119](kek/kek.c#L119)) and `SDL_AppIterate` spins on `SDL_Delay(1)`
   ([main_sdl.c](platform/main_sdl.c)). Move to real dt with an upper clamp. Knock-on effect:
   `GAME_EntryScene_render` derives its rotation from `ticks / target_fps`, which stops being time — it
   needs accumulated seconds instead of a frame counter.
@@ -93,22 +54,32 @@ These shape several items below, so they are recorded once here.
   (current and previous frame, for edge detection) cost 128 bytes against the ~2.6 MB already in BSS, so
   static memory is not an argument against it. Mouse and gamepad later.
 
-- **Leaked texture slot.** [kek_file_model.c#L242](kek/kek_file_model.c#L242) drops the handle returned by
-  `kek_file_image_load()` and stores only the raw `KEK_texture*`, so the pool slot can never be released.
-  `KEK_model` should hold a `KEK_TextureHandle` and `kek_model_destroy` should free it.
-
 - **~50 KB of stack in the model loader.** The locals at
-  [kek_file_model.c#L63](kek/kek_file_model.c#L63) are why the web build needs `-sSTACK_SIZE=1048576`.
+  [kek_file_model.c#L67](kek/kek_file_model.c#L67) are why the web build needs `-sSTACK_SIZE=1048576`.
   Move them to a static scratch buffer, in keeping with the no-dynamic-allocation rule.
 
 - **On-disk layout rests on compiler padding.** `KEK_FileModel_Header` is read with a single
   `read(sizeof(hdr))` and has to match `KMDL_HEADER_STRUCT = "<4sHHHHHHHBx"` in
-  [obj_to_kmf.py](scripts/obj_to_kmf.py). It does — both are 20 bytes — but nothing enforces it. Add
-  `KEK_STATIC_ASSERT` on both header sizes and on `KEK_palette_item`, and write `docs/formats.md`.
+  [obj_to_kmf.py](scripts/obj_to_kmf.py). It does — both are 20 bytes — but nothing enforces it.
+  `KEK_STATIC_ASSERT_DECL` exists now and holds `KEK_palette_item` at 3 bytes; the KMF and KIF headers
+  still need the same treatment, and `docs/formats.md` still needs writing.
 
-- **`kek_blit()` and `kek_line()` do not clip** ([kek.c#L81](kek/kek.c#L81)). They are fast paths and should
-  stay that way, but they do not belong in the public [kek.h](kek/include/kek.h). Move them to an internal
-  header: the only callers are `kek_2d.c` and `kek_3d.c`, and both clip already.
+- **`kek_2d_triangle` clamps where it should reject.** It clamps `xl` and `xr` into the viewport
+  independently ([kek_2d.c#L427](kek/kek_2d.c#L427)), so a triangle entirely off one side draws a
+  one-pixel column glued to that edge instead of nothing. `kek_2d_span` next door already does this
+  correctly; the triangle predates it and should go through it. Cosmetic, not a memory error — the
+  clamping keeps it in bounds.
+
+- **Reserved identifiers throughout.** Every `_kek_*` and `_GAME_*` file-scope static claims a name the
+  standard reserves. `bugprone-reserved-identifier` is switched off in [.clang-tidy](.clang-tidy) with
+  that reasoning recorded: the finding is correct, but a rename touching every translation unit is its
+  own change and not something to smuggle in behind a linter. Do it deliberately or decide not to.
+
+- **`needs a decision`: should clang-tidy block a merge?** The tree is clean against the configured set,
+  so the only thing standing in the way is that the runner's clang-tidy version is not pinned and a
+  newer one can add a check to `bugprone-*` overnight. Making it blocking is two lines —
+  `WarningsAsErrors: '*'` in [.clang-tidy](.clang-tidy) and dropping `continue-on-error` in
+  [native.yml](.github/workflows/native.yml). Pinning the version instead is the third option.
 
 ## Tier 1 — Splitting the engine from the game
 
@@ -154,9 +125,10 @@ roughly 20 KB of actual data.
 
   The expensive part is the API, not the allocator. `kek_model_create(e)` hands back a worst-case slot;
   an arena has to know the size up front, so it becomes `kek_model_create(e, verts, faces, flags)`. And
-  `kek_model_destroy` has no meaning in a bump allocator — there are 14 calls to the destroy functions,
+  `kek_model_destroy` has no meaning in a bump allocator — there are 17 calls to the destroy functions,
   6 in [kek_file_model.c](kek/kek_file_model.c), 6 in [kek_file_image.c](kek/kek_file_image.c), 2 in the
-  game. What rescues it: almost all of them are LIFO by construction, since the loaders free exactly what
+  game, and 3 in [kek_pool.c](kek/kek_pool.c) itself, where `kek_model_destroy` now releases a texture
+  the model owns. What rescues it: almost all of them are LIFO by construction, since the loaders free exactly what
   they just built on an error path. So a two-ended arena with marks works — permanent data (default cube
   and texture, fonts) from the low end, per-level data from the high end, released wholesale on level
   change, plus `kek_arena_mark()`/`kek_arena_release(mark)`. `destroy` genuinely frees when the block is
@@ -188,7 +160,7 @@ roughly 20 KB of actual data.
 
 - **There is no lighting.** The shading palette is computed at init
   (`kek_invalidate_shading_palette`) and face normals are loaded or generated
-  ([kek_file_model.c#L39](kek/kek_file_model.c#L39)) — and `kek_3d_draw_model` uses neither. Everything
+  ([kek_file_model.c#L43](kek/kek_file_model.c#L43)) — and `kek_3d_draw_model` uses neither. Everything
   renders as flat colour or unlit texture. Flat or Gouraud shading through the existing
   `kek_palette_shade()` is the largest visual return for the least code in the whole backlog.
 - **Nothing draws an image in 2D.** [kek_2d.h](kek/include/kek_2d.h) has primitives and 5×8 text but no way
@@ -248,7 +220,7 @@ rendering is a single hardcoded `kek_3d_draw_model` call.
   coordinates ([game_scene_entry.c](game/game_scene_entry.c)). No menu, no HUD, no weapons, no enemies,
   no game loop, no win or lose.
 - **Cleanup once entities exist**: the dead `if (!e->assets)` at
-  [game_scene_entry.c#L79](game/game_scene_entry.c#L79) and the commented-out multi-model draw.
+  [game_scene_entry.c#L81](game/game_scene_entry.c#L81) and the commented-out multi-model draw.
 
 ## Tier 7 — Later
 
@@ -261,7 +233,9 @@ rendering is a single hardcoded `kek_3d_draw_model` call.
   layout. Build with DJGPP. Other platform layers per the README's "as many platforms as possible"; SDL3
   is the only one so far.
 - **Scripts**: no `requirements.txt` (Pillow is needed), no round-trip tests for `obj_to_kmf` or
-  `bmp_to_kif`. [palette_to_bmp.py](scripts/palette_to_bmp.py) also embeds its own copy of the default
-  palette as a string and parses it with a regex, so the table has two sources of truth already —
-  independent of the layout change in Tier 0, but it will need the same edit.
+  `bmp_to_kif`. The default palette has three copies: the engine's table in
+  [kek_palette.c](kek/kek_palette.c), a string in [palette_to_bmp.py](scripts/palette_to_bmp.py) parsed
+  with a regex, and `ENGINE_PALETTE_888` in [bmp_to_kif.py](scripts/bmp_to_kif.py). All three agree
+  today — the first two were checked byte for byte when the item shrank to three channels — but nothing
+  keeps them agreeing. Generate the Python copies from the C table, or the C table from a data file.
 - **Docs**: CONTRIBUTING.

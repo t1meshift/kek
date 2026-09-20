@@ -412,39 +412,30 @@ void kek_2d_triangle(KEK_engine* engine, KEK_IVec2 vertices[3], uint8_t color_fi
 
     total_height = c.y - a.y;
 
+    /* Both loops intersect the segment's y range with the viewport rather than
+       clamping its ends into it: clamping turns a triangle entirely above or
+       below the screen into a single row drawn at the edge it fell off. An
+       empty intersection leaves y0 > y1 and the loop does not run. The spans go
+       through kek_2d_span, which applies the same rule in x. */
     if (a.y != b.y) {
         segment_height = b.y - a.y;
-        int ay = KEK_MAX(0, KEK_MIN(a.y, engine->h - 1));
-        int by = KEK_MAX(0, KEK_MIN(b.y, engine->h - 1));
-        for (y = ay; y <= by; ++y) {
+        int y0 = KEK_MAX(a.y, 0);
+        int y1 = KEK_MIN(b.y, engine->h - 1);
+        for (y = y0; y <= y1; ++y) {
             x1 = a.x + ((c.x - a.x)*(y - a.y)) / total_height;
             x2 = a.x + ((b.x - a.x)*(y - a.y)) / segment_height;
-            if (y < 0 || y >= engine->h) {
-                continue;
-            }
-            int xl = KEK_MIN(x1, x2);
-            int xr = KEK_MAX(x1, x2);
-            xl = KEK_MAX(0, KEK_MIN(xl, engine->w - 1));
-            xr = KEK_MAX(0, KEK_MIN(xr, engine->w - 1));
-            kek_line(engine, y, xl, xr, color_fill);
+            kek_2d_span(engine, y, x1, x2, color_fill);
         }
     }
 
     if (b.y != c.y) {
         segment_height = c.y - b.y;
-        int by = KEK_MAX(0, KEK_MIN(b.y, engine->h - 1));
-        int cy = KEK_MAX(0, KEK_MIN(c.y, engine->h - 1));
-        for (y = by; y <= cy; ++y) {
+        int y0 = KEK_MAX(b.y, 0);
+        int y1 = KEK_MIN(c.y, engine->h - 1);
+        for (y = y0; y <= y1; ++y) {
             x1 = a.x + ((c.x - a.x)*(y - a.y)) / total_height;
             x2 = b.x + ((c.x - b.x)*(y - b.y)) / segment_height;
-            if (y < 0 || y >= engine->h) {
-                continue;
-            }
-            int xl = KEK_MIN(x1, x2);
-            int xr = KEK_MAX(x1, x2);
-            xl = KEK_MAX(0, KEK_MIN(xl, engine->w - 1));
-            xr = KEK_MAX(0, KEK_MIN(xr, engine->w - 1));
-            kek_line(engine, y, xl, xr, color_fill);
+            kek_2d_span(engine, y, x1, x2, color_fill);
         }
     }
 }

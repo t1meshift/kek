@@ -34,3 +34,7 @@ function(kek_add_test name)
 endfunction()
 
 kek_add_test(test_asset_memory)
+kek_add_test(test_math)
+kek_add_test(test_palette)
+kek_add_test(test_2d_clip_line)
+kek_add_test(test_pool test_support.c)

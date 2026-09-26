@@ -22,44 +22,29 @@ These shape several items below, so they are recorded once here.
 
 ## Tier 0 — Foundation
 
-- **No tests.** The engine is full of pure, trivially testable functions:
-  [kek_math.c](kek/kek_math.c) (`kek_mat3_from_euler`, `kek_normalize_fvec3`, `kek_area_triangle_signed`),
-  [kek_palette.c](kek/kek_palette.c) (`kek_palette_nearest_color`, `kek_palette_calculate_shading`),
-  `kek_2d_clip_line` at [kek_2d.c#L11](kek/kek_2d.c#L11),
-  [kek_pool.c](kek/kek_pool.c) (handle encoding, generation reuse, refusal past capacity, and the
-  `owns_texture` rule — a clone shares a model's texture handle but never its ownership), and the
-  [KMF](kek/kek_file_model.c) and [KIF](kek/kek_file_image.c) parsers against truncated and malformed
-  input. This is now the only thing left in this tier that the rest of the tier was waiting on, and the
-  arena in Tier 2 must not be attempted before it.
-
-- **Rendering is testable without golden images.** `KEK_engine.fb` and `.db` are pointers, so a test can
-  supply its own buffer with guard bytes around it and assert the things that do not depend on float:
-  the rasterizer never writes outside the frame, the depth test rejects what is further away,
-  `kek_texture_sample` is correct at the edges under both `CLAMP` and `REPEAT`, and near-plane clipping
-  yields 0, 3 or 4 vertices. The 2D primitives have already been through exactly this exercise by hand —
-  reversed rectangle corners and circles hanging off every edge, under ASan — and it found three
-  out-of-bounds writes. `kek_2d_triangle` went through the same exercise in `349beae`, against a
-  guarded buffer, with triangles off each edge, degenerate ones, and one larger than the screen.
-  Both passes should become tests rather than stay things that were done once and thrown away.
-
-- **No in-memory `KEK_AssetProvider`.** Needed to exercise the parsers without touching the filesystem.
-  The vtable is already defined in [kek_asset.h](kek/include/kek_asset.h); this belongs in the engine
-  rather than in `platform/` — see Tier 1.
-
 - **No input state API.** The engine only delivers `key_down`/`key_up` events, so every scene keeps its own
   bitmask — see `_GAME_EntryScene_Movement` at
   [game_scene_entry.c#L15](game/game_scene_entry.c#L15). Two bitsets over `KEK_SCANCODE_SIZE = 512`
   (current and previous frame, for edge detection) cost 128 bytes against the ~2.6 MB already in BSS, so
   static memory is not an argument against it. Mouse and gamepad later.
 
-- **`kek_palette.c` does not compile outside the CMake build.** It reads
-  `KEK_PALETTE_SHADING_LEVELS` but reaches no include that defines it, so the `#ifndef` default in
-  [kek_config.h](kek/include/kek_config.h) never applies and only the `-D` from
-  [CMakeLists.txt](CMakeLists.txt) makes it build. It is the only file in `kek/` that fails
-  `gcc -fsyntax-only -Ikek/include` on its own; every other user of a config macro happens to reach
-  the header transitively. One `#include` fixes it, but the shape of the problem is that the defaults
-  are load-bearing only by luck of the include graph — the tests in this tier will compile these
-  files on their own terms and want them self-contained.
+- **`needs a decision`: `kek_2d_triangle` overflows `int` on large triangles.** Each span end is
+  `a.x + (c.x - a.x) * (y - a.y) / height` in `int`, so a triangle spanning more than ~46,000 pixels on
+  both axes is signed overflow — UBSan reports it with vertices at ±50000. The screen needs 320×200, but
+  nothing upstream bounds what reaches the primitive. Clip the triangle first, widen the product (a
+  64-bit multiply is not free on a 486), or document a coordinate range and assert it; fixed point will
+  have to answer the same question with less headroom. The test is in place and ignored:
+  `test_a_triangle_spanning_100000_pixels_fills_the_frame` in
+  [test_render_2d.c](tests/test_render_2d.c).
+
+- **`KEK_POOL_MODEL_UVS_MAX` means two things.** The pool sizes `face_textures` — one UV triple *per face*
+  — by it, and CMake describes it as "max textured faces", but `kek_file_model_load` checks it against
+  `uv_count`, the number of *distinct* UVs, and then writes `faces_count` entries into `face_textures`.
+  With the default config every limit is 1024 and nothing happens. Configure `UVS_MAX` below
+  `FACES_MAX` and a textured model with more faces than `UVS_MAX` writes past the end of its slot's
+  array, into the next slot. The loader should check `faces_count` against it under `HAS_TEXTURE`, the
+  way it already checks the colour block. Found by reading, not by a test — the suite builds one
+  config — so it is recorded rather than fixed.
 
 - **Reserved identifiers throughout.** Every `_kek_*` and `_GAME_*` file-scope static claims a name the
   standard reserves. `bugprone-reserved-identifier` is switched off in [.clang-tidy](.clang-tidy) with
@@ -82,10 +67,10 @@ separation only gets more expensive. Preparation matters more than the move itse
   config field instead of a known symbol.
 - **`GAME_NAME` is the CMake project name** and the prefix of every target. The project is the engine; the
   game is a consumer.
-- **Reorganise the sources.** `kek/io/kek_asset_memory.c` (pure C, no file I/O — engine material),
-  `kek/io/kek_asset_stdio.c` behind `KEK_WITH_STDIO_ASSETS` (stdio is not present on every target the
-  engine aims at — this is today's [platform_assets_fs.c](platform/platform_assets_fs.c)), and
-  `platform/sdl3/` for the OS backend.
+- **Reorganise the sources.** `kek/io/kek_asset_memory.c` is already there (pure C, no file I/O —
+  engine material). What remains is `kek/io/kek_asset_stdio.c` behind `KEK_WITH_STDIO_ASSETS` (stdio is
+  not present on every target the engine aims at — this is today's
+  [platform_assets_fs.c](platform/platform_assets_fs.c)), and `platform/sdl3/` for the OS backend.
 - **Make the engine installable** — install rules and an export set, so an out-of-tree game can consume it
   through `find_package(kek)` or FetchContent.
 - **A sample in the public repository.** [web-demo.yml](.github/workflows/web-demo.yml) builds the game
@@ -128,8 +113,10 @@ roughly 20 KB of actual data.
   matter *more* under an arena, not less: they are the only thing that turns a use-after-release into a
   detectable error instead of a corrupted triangle three weeks later.
 
-  Sequence: the pool tests from Tier 0 come first. Swapping the allocator underneath this without them is
-  how that corrupted triangle happens.
+  The pool tests from Tier 0 are in place, in [test_pool.c](tests/test_pool.c): public API only, no
+  slot, capacity or handle bit read, so the arena has to pass them unchanged. The parser suites check
+  after every failed load that both pools have the free capacity they had before, which is the same
+  property the loaders' LIFO error paths will rely on under marks.
 - **Normals are the largest array in the engine and nothing reads them.** `KEK_model_face_normal` is
   3 × `KEK_FVec3` = 36 bytes per face, 36,864 bytes per slot — 42% of a model — and `kek_3d_draw_model`
   never touches them. KMF already stores them indexed (`KEK_FileModel_FaceVertex.normal`) and the loader
@@ -161,7 +148,7 @@ roughly 20 KB of actual data.
   ([kek_3d.h](kek/include/kek_3d.h)) — required before anything can be placed in a world.
 - **Divides in the per-pixel loop** in `kek_3d_triangle` and `kek_3d_triangle_textured` (`w0 / area`,
   `u_over_z / inv_z`). Precompute `1/area` and move to affine spans with subdivision — the technique Quake
-  used to hide one divide behind sixteen pixels. Measure first; there is no profiling harness either.
+  used to hide one divide behind sixteen pixels. Measure first; there is no profiling harness.
 - **The depth buffer is the single largest allocation.** 320×200×4 = 250 KB against 62.5 KB for the frame
   itself. Quantised `1/z` in `uint16` halves it and cuts memory traffic in the hot loop. Quake used a
   16-bit z-buffer at this resolution, and only for alias models.
@@ -249,6 +236,10 @@ on the hash has the reasoning, the measurements and what was verified.
 | `kek_2d_triangle` clamped where it should reject | Off-screen spans collapsed onto the edge they fell off. Worse in y than recorded here: clamping `a.y`/`b.y` into range gave `ay == by == 0`, so a triangle at y = -300 drew a full 320-pixel row along the top. Both axes intersect now, spans go through `kek_2d_span` | `349beae` |
 | ~50 KB of stack in the model loader | A worst-case KMF was staged in locals: 51,712 bytes of frame against 672 for the next largest in the engine. Static scratch, 240 bytes of frame, and the browser build's `-sSTACK_SIZE=1048576` is gone | `acbcbb7` |
 | On-disk layout rested on compiler padding | The KMF and KIF headers matched their Python writers by coincidence. Size and every field offset asserted, plus the record types; `docs/formats.md` written | `3520df1` |
+| `kek_palette.c` not self-contained | It read `KEK_PALETTE_SHADING_LEVELS` without including `kek_config.h`, so only the CMake `-D` made it compile. It includes it now, and the default became a signed `4` like the `-D`: as `4u` it would have clamped a negative shade to the top | `25d41a2` |
+| No tests | Unity, fetched like SDL3 and ImGui, driven by CTest, one executable per suite, nothing that needs `fork`, SDL3 or a prebuilt library. Unit suites for the math, palette, line clipper and pools (public API only); KMF and KIF parsers against every truncation, bad magic and version, counts one past each limit and out-of-range indices, with a leak check after every rejection | `f2232be`, `1eefa93`, `3ace570` |
+| No in-memory `KEK_AssetProvider` | `kek/io/kek_asset_memory.c`: a table of `{path, bytes, size}` the caller owns, no stdio, no allocation | `9b8a5fa` |
+| Rendering untested | A guarded frame the engine renders into; the 2D and triangle hand passes as tests at two frame sizes, the depth test in both draw orders, `kek_texture_sample` at the edges under `CLAMP` and `REPEAT`, `kek_3d_clip_near` at 0, 3 and 4 plus a 5000-triangle sweep, and whole cubes through the near plane | `db60ba8` |
 
 ### Tier 3
 
@@ -267,3 +258,6 @@ on the hash has the reasoning, the measurements and what was verified.
 | Unclipped 2D primitives | `kek_2d_circle`, `kek_2d_circle_border` and `kek_2d_rect` handed unclipped coordinates to `kek_blit`/`kek_line`. Under ASan: a `negative-size-param` memset of -65455 bytes, a global-buffer-overflow and a SEGV. `kek_2d_span`/`kek_2d_point` are the clipping counterparts | `d4776d4` |
 | Undefined shift | `error << 1` in the Bresenham loop of `kek_2d_line`, where `error` is routinely negative | `d4776d4` |
 | `KEK_STATIC_ASSERT_DECL` collided with itself | It named its typedef after `__LINE__`, so two headers asserting on the same line number in one translation unit were a duplicate typedef — an error in C99, not a tolerated redeclaration. It would have broken on the second header that used it. Takes an explicit tag now | `3520df1` |
+| `kek_palette_shade` read past its table | It clamped the shade to `[0, LEVELS]` and read row `LEVELS` — one row past the end, a global-buffer-overflow under ASan. Nothing calls it yet; lighting would have been first | `eb2b0b6` |
+| `kek_2d_clip_line` accepted segments that miss | Ends in two different outside regions got past the trivial reject even when the segment passed clear of a corner, and the final clamp pulled the stray intersections onto the edge: a segment missing the top-left corner drew the whole left column. 2298 of 20000 random segments | `fd4b3b2` |
+| `kek_2d_line` dropped its last pixel | The Bresenham loop tested after stepping, so every non-horizontal line stopped one short, and a line drawn the other way drew a different set. Closed borders hid it | `3a66b54` |

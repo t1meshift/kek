@@ -99,3 +99,69 @@ void kek_test_file_patch_u16(KEK_TestFile* file, size_t offset, uint16_t value) 
     file->bytes[offset] = (uint8_t)(value & 0xFFu);
     file->bytes[offset + 1] = (uint8_t)(value >> 8);
 }
+
+#define KEK_TEST_GUARD_BYTE 0xA5u
+
+/* Guards on both sides, plus room for the largest frame a test attaches. */
+static uint8_t kek_test_fb[KEK_TEST_FRAME_GUARD + KEK_TEST_FRAME_MAX_PIXELS + KEK_TEST_FRAME_GUARD];
+static float kek_test_db[KEK_TEST_FRAME_GUARD + KEK_TEST_FRAME_MAX_PIXELS + KEK_TEST_FRAME_GUARD];
+static size_t kek_test_frame_pixels;
+
+void kek_test_frame_attach(KEK_engine* e, uint16_t w, uint16_t h) {
+    TEST_ASSERT_TRUE_MESSAGE((size_t)w * h <= KEK_TEST_FRAME_MAX_PIXELS, "test frame larger than its storage");
+
+    memset(kek_test_fb, KEK_TEST_GUARD_BYTE, sizeof(kek_test_fb));
+    memset(kek_test_db, KEK_TEST_GUARD_BYTE, sizeof(kek_test_db));
+    kek_test_frame_pixels = (size_t)w * h;
+
+    e->fb = kek_test_fb + KEK_TEST_FRAME_GUARD;
+    e->db = kek_test_db + KEK_TEST_FRAME_GUARD;
+    e->w = w;
+    e->h = h;
+    kek_test_frame_clear(e);
+}
+
+void kek_test_frame_clear(KEK_engine* e) {
+    kek_flush_buffers(e);
+}
+
+static void kek_test_assert_guard_bytes(const uint8_t* bytes, size_t count, const char* message) {
+    size_t i;
+    for (i = 0; i < count; ++i) {
+        if (bytes[i] != KEK_TEST_GUARD_BYTE) {
+            TEST_FAIL_MESSAGE(message);
+        }
+    }
+}
+
+void kek_test_frame_assert_guards(void) {
+    const uint8_t* db_bytes = (const uint8_t*)kek_test_db;
+    size_t used = KEK_TEST_FRAME_GUARD + kek_test_frame_pixels;
+
+    kek_test_assert_guard_bytes(kek_test_fb, KEK_TEST_FRAME_GUARD,
+        "framebuffer written before its first pixel");
+    kek_test_assert_guard_bytes(kek_test_fb + used, sizeof(kek_test_fb) - used,
+        "framebuffer written past its last pixel");
+    kek_test_assert_guard_bytes(db_bytes, KEK_TEST_FRAME_GUARD * sizeof(float),
+        "depth buffer written before its first entry");
+    kek_test_assert_guard_bytes(db_bytes + used * sizeof(float), sizeof(kek_test_db) - used * sizeof(float),
+        "depth buffer written past its last entry");
+}
+
+uint8_t kek_test_frame_pixel(const KEK_engine* e, int x, int y) {
+    TEST_ASSERT_TRUE(x >= 0 && x < e->w && y >= 0 && y < e->h);
+    return e->fb[(size_t)y * e->w + (size_t)x];
+}
+
+int kek_test_frame_painted(const KEK_engine* e) {
+    return (int)kek_test_frame_pixels - kek_test_frame_count(e, 0);
+}
+
+int kek_test_frame_count(const KEK_engine* e, uint8_t color) {
+    size_t i;
+    int count = 0;
+    for (i = 0; i < (size_t)e->w * e->h; ++i) {
+        count += e->fb[i] == color;
+    }
+    return count;
+}

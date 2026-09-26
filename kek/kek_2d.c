@@ -208,6 +208,23 @@ char kek_2d_clip_line(KEK_IVec2 *p0, KEK_IVec2 *p1, KEK_IRect2 v) {
     }
 
     /*
+     * The trivial tests above do not settle every case. Two endpoints in
+     * different outside regions — one left, one above — can still pass
+     * clear of the rectangle beyond its corner, and then the intersections
+     * computed above land outside it, on the extension of an edge. Clamping
+     * those would draw a line that is not there: a segment missing the
+     * top-left corner came back as the whole left edge.
+     *
+     * A real intersection is on an edge to within float error, so anything
+     * further out than that is a miss. The slack is a pixel: a segment that
+     * misses by less rounds onto the corner, which is as good an answer as
+     * rejecting it.
+     */
+    if (nx0 < xmin - 1.f || nx0 > xmax + 1.f || ny0 < ymin - 1.f || ny0 > ymax + 1.f ||
+        nx1 < xmin - 1.f || nx1 > xmax + 1.f || ny1 < ymin - 1.f || ny1 > ymax + 1.f)
+        return 0;
+
+    /*
      * Convert clipped float coordinates back to integer space.
      *
      * roundf() is simple and readable for now.
@@ -222,9 +239,9 @@ char kek_2d_clip_line(KEK_IVec2 *p0, KEK_IVec2 *p1, KEK_IRect2 v) {
     /*
      * Final safety clamp.
      *
-     * In theory the computed points should already lie on or inside
-     * the rectangle. In practice, float rounding near the boundary can
-     * produce values like xmax+1 or ymin-1, so we clamp defensively.
+     * After the check above the points lie within a pixel of the
+     * rectangle, but float rounding near the boundary and that pixel of
+     * slack can still produce values like xmax+1 or ymin-1, so we clamp.
      */
     if (p0->x < xmin) p0->x = xmin; else if (p0->x > xmax) p0->x = xmax;
     if (p0->y < ymin) p0->y = ymin; else if (p0->y > ymax) p0->y = ymax;

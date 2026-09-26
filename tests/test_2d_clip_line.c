@@ -1,6 +1,9 @@
 /* kek_2d_clip_line: Cohen–Sutherland-style clipping of an integer segment to
-   an inclusive rectangle. */
+   an inclusive rectangle. Hand-picked cases first, then a sweep of segments
+   checked against a straightforward Liang–Barsky reference in double. */
 
+#include <math.h>
+#include <stdio.h>
 #include "unity.h"
 #include "kek_2d.h"
 
@@ -127,6 +130,129 @@ void test_invalid_arguments_are_rejected(void) {
     TEST_ASSERT_FALSE(clip(&p0, &p1, negative));
 }
 
+/* Ends in two different outside regions, so neither trivial test applies, but
+   the segment passes clear of the rectangle beyond a corner. Each of these
+   misses by about seven pixels. */
+void test_a_segment_passing_outside_a_corner_is_rejected(void) {
+    const KEK_IVec2 cases[4][2] = {
+        { { XMIN - 20, YMIN + 10 }, { XMIN + 10, YMIN - 20 } }, /* top left */
+        { { XMAX + 20, YMIN + 10 }, { XMAX - 10, YMIN - 20 } }, /* top right */
+        { { XMIN - 20, YMAX - 10 }, { XMIN + 10, YMAX + 20 } }, /* bottom left */
+        { { XMAX + 20, YMAX - 10 }, { XMAX - 10, YMAX + 20 } }  /* bottom right */
+    };
+    int i;
+
+    for (i = 0; i < 4; ++i) {
+        KEK_IVec2 p0 = cases[i][0], p1 = cases[i][1];
+        KEK_IVec2 q0 = cases[i][1], q1 = cases[i][0];
+        TEST_ASSERT_FALSE(clip(&p0, &p1, VIEW));
+        TEST_ASSERT_FALSE(clip(&q0, &q1, VIEW));
+    }
+}
+
+/* ---- Sweep against a reference ---- */
+
+/* Liang–Barsky on the closed rectangle [xmin-grow, xmax+grow] x ..., in
+   double. Returns whether the segment touches it and, if so, the parameters
+   of the visible part. */
+static int reference_clip(double x0, double y0, double x1, double y1, double grow,
+                          double* t_enter, double* t_leave) {
+    const double p[4] = { -(x1 - x0), x1 - x0, -(y1 - y0), y1 - y0 };
+    const double q[4] = {
+        x0 - (XMIN - grow), (XMAX + grow) - x0,
+        y0 - (YMIN - grow), (YMAX + grow) - y0
+    };
+    double t0 = 0.0, t1 = 1.0;
+    int i;
+
+    for (i = 0; i < 4; ++i) {
+        if (p[i] == 0.0) {
+            if (q[i] < 0.0) {
+                return 0;
+            }
+            continue;
+        }
+        {
+            double t = q[i] / p[i];
+            if (p[i] < 0.0) {
+                if (t > t1) return 0;
+                if (t > t0) t0 = t;
+            } else {
+                if (t < t0) return 0;
+                if (t < t1) t1 = t;
+            }
+        }
+    }
+
+    *t_enter = t0;
+    *t_leave = t1;
+    return 1;
+}
+
+static unsigned sweep_state = 12345u;
+
+static int sweep_coordinate(int lo, int hi) {
+    /* Numerical Recipes LCG: deterministic on every target, which rand() is
+       not. */
+    sweep_state = sweep_state * 1664525u + 1013904223u;
+    return lo + (int)((sweep_state >> 8) % (unsigned)(hi - lo + 1));
+}
+
+/* Every accepted segment ends inside the rectangle and on the original line;
+   every segment that crosses the rectangle is accepted; and every segment
+   that passes clear of it — by more than a pixel — is rejected. The pixel of
+   slack is for rounding at a corner, where both answers are defensible. */
+void test_sweep_agrees_with_a_reference_clipper(void) {
+    int n;
+
+    for (n = 0; n < 20000; ++n) {
+        KEK_IVec2 a = { sweep_coordinate(-400, 740), sweep_coordinate(-300, 540) };
+        KEK_IVec2 b = { sweep_coordinate(-400, 740), sweep_coordinate(-300, 540) };
+        KEK_IVec2 p0 = a, p1 = b;
+        double t_enter, t_leave;
+        int touches = reference_clip(a.x, a.y, b.x, b.y, 0.0, &t_enter, &t_leave);
+        int near = reference_clip(a.x, a.y, b.x, b.y, 1.0, &t_enter, &t_leave);
+        char accepted = clip(&p0, &p1, VIEW);
+        char message[160];
+
+        (void)snprintf(message, sizeof(message), "segment (%d,%d)-(%d,%d)", a.x, a.y, b.x, b.y);
+
+        if (touches) {
+            TEST_ASSERT_TRUE_MESSAGE(accepted, message);
+        }
+        if (!near) {
+            TEST_ASSERT_FALSE_MESSAGE(accepted, message);
+        }
+        if (!accepted) {
+            continue;
+        }
+
+        TEST_ASSERT_TRUE_MESSAGE(p0.x >= XMIN && p0.x <= XMAX && p0.y >= YMIN && p0.y <= YMAX, message);
+        TEST_ASSERT_TRUE_MESSAGE(p1.x >= XMIN && p1.x <= XMAX && p1.y >= YMIN && p1.y <= YMAX, message);
+
+        /* Both clipped ends lie on the original line, to within rounding. */
+        {
+            double dx = b.x - a.x, dy = b.y - a.y;
+            double length = sqrt(dx * dx + dy * dy);
+            if (length > 0.0) {
+                double d0 = fabs((p0.x - a.x) * dy - (p0.y - a.y) * dx) / length;
+                double d1 = fabs((p1.x - a.x) * dy - (p1.y - a.y) * dx) / length;
+                TEST_ASSERT_TRUE_MESSAGE(d0 <= 1.5 && d1 <= 1.5, message);
+            }
+        }
+
+        /* Where the crossing is not marginal, the ends are where the
+           reference puts them. */
+        if (reference_clip(a.x, a.y, b.x, b.y, -1.0, &t_enter, &t_leave)) {
+            reference_clip(a.x, a.y, b.x, b.y, 0.0, &t_enter, &t_leave);
+            TEST_ASSERT_FLOAT_WITHIN_MESSAGE(1.0f, (float)(a.x + t_enter * (b.x - a.x)), (float)p0.x, message);
+            TEST_ASSERT_FLOAT_WITHIN_MESSAGE(1.0f, (float)(a.y + t_enter * (b.y - a.y)), (float)p0.y, message);
+            TEST_ASSERT_FLOAT_WITHIN_MESSAGE(1.0f, (float)(a.x + t_leave * (b.x - a.x)), (float)p1.x, message);
+            TEST_ASSERT_FLOAT_WITHIN_MESSAGE(1.0f, (float)(a.y + t_leave * (b.y - a.y)), (float)p1.y, message);
+        }
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_a_segment_inside_is_left_alone);
@@ -139,5 +265,7 @@ int main(void) {
     RUN_TEST(test_a_diagonal_entering_through_a_side_and_leaving_through_the_top);
     RUN_TEST(test_a_single_pixel_rectangle);
     RUN_TEST(test_invalid_arguments_are_rejected);
+    RUN_TEST(test_a_segment_passing_outside_a_corner_is_rejected);
+    RUN_TEST(test_sweep_agrees_with_a_reference_clipper);
     return UNITY_END();
 }

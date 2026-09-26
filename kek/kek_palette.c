@@ -56,7 +56,9 @@ void kek_palette_calculate_shading(uint8_t *shading_palette, const KEK_palette_i
 }
 
 uint8_t kek_palette_shade(const uint8_t *shades, uint8_t base, int shade) {
-    shade = KEK_MAX(0, KEK_MIN(shade, KEK_PALETTE_SHADING_LEVELS));
+    /* LEVELS rows, so the last is LEVELS - 1; LEVELS itself is the row after
+       the table. */
+    shade = KEK_MAX(0, KEK_MIN(shade, KEK_PALETTE_SHADING_LEVELS - 1));
     return shades[256 * shade + base];
 }
 

@@ -175,6 +175,15 @@ void test_shade_clamps_a_negative_level_to_the_first_row(void) {
     TEST_ASSERT_EQUAL_UINT8(0, kek_palette_shade(shading, 255, -1000));
 }
 
+/* The table has LEVELS rows, so LEVELS - 1 is the darkest there is. Asking for
+   darker still has to land on it, not on whatever lies past the table. */
+void test_shade_clamps_a_level_past_the_last_row_to_the_last_row(void) {
+    number_rows_by_level();
+    TEST_ASSERT_EQUAL_UINT8(LEVELS - 1, kek_palette_shade(shading, 17, LEVELS));
+    TEST_ASSERT_EQUAL_UINT8(LEVELS - 1, kek_palette_shade(shading, 255, LEVELS + 1));
+    TEST_ASSERT_EQUAL_UINT8(LEVELS - 1, kek_palette_shade(shading, 0, 1000));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_nearest_finds_every_colour_that_is_in_the_palette);
@@ -188,5 +197,6 @@ int main(void) {
     RUN_TEST(test_shading_with_null_arguments_writes_nothing);
     RUN_TEST(test_shade_picks_the_row_for_the_level);
     RUN_TEST(test_shade_clamps_a_negative_level_to_the_first_row);
+    RUN_TEST(test_shade_clamps_a_level_past_the_last_row_to_the_last_row);
     return UNITY_END();
 }

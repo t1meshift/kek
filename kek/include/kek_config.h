@@ -53,8 +53,11 @@
 #define KEK_POOL_TEXTURE_PIXELS_MAX (256u * 256u)
 #endif
 
+/* Signed, unlike its neighbours, and the same as the -D CMake passes: it bounds
+   loops over int and clamps the signed shade in kek_palette_shade, where an
+   unsigned default would turn a negative shade into a huge one. */
 #ifndef KEK_PALETTE_SHADING_LEVELS
-#define KEK_PALETTE_SHADING_LEVELS 4u
+#define KEK_PALETTE_SHADING_LEVELS 4
 #endif
 
 #endif // KEK_CONFIG_H

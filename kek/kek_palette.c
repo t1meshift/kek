@@ -1,6 +1,7 @@
 #include <limits.h>
 #include <stdint.h>
 #include "kek_palette.h"
+#include "kek_config.h"
 #include "kek_macro.h"
 
 uint8_t kek_palette_nearest_color(const KEK_palette_item *palette, KEK_palette_item color) {

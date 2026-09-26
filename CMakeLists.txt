@@ -159,6 +159,7 @@ endfunction()
 ######## KEK engine ########
 add_library(kek 
   kek/include/kek_asset.h
+  kek/include/kek_asset_memory.h
   kek/include/kek_keyboard.h
   kek/include/kek_macro.h
   kek/include/kek_math.h
@@ -186,6 +187,7 @@ add_library(kek
   kek/kek_file_image.c
   kek/kek_file_model.c
   kek/kek.c
+  kek/io/kek_asset_memory.c
 )
 set_target_properties(kek PROPERTIES 
   C_STANDARD 99

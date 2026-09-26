@@ -32,3 +32,5 @@ function(kek_add_test name)
   target_link_libraries(${name} PRIVATE kek unity)
   add_test(NAME ${name} COMMAND ${name})
 endfunction()
+
+kek_add_test(test_asset_memory)

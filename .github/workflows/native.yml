@@ -1,8 +1,9 @@
 name: Native
 
 # Builds the engine, the game, the SDL3 platform layer and the editor on the
-# toolchains people actually use. web-demo.yml covers Emscripten and is
-# deliberately separate — it publishes, this one only checks.
+# toolchains people actually use, and runs the engine's unit tests. web-demo.yml
+# covers Emscripten and is deliberately separate — it publishes, this one only
+# checks.
 on:
   push:
     branches: [master]
@@ -85,11 +86,11 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
-      # The harness is in tests/ (Unity, registered with CTest) but holds no
-      # suites yet; --no-tests=ignore keeps an empty one from being an error
-      # and goes as soon as the first suite lands.
+      # The engine's unit tests, from tests/ — Unity suites registered with
+      # CTest. --no-tests=error because an empty suite would mean the tests
+      # stopped being built, and that should fail rather than pass quietly.
       - name: Test
-        run: ctest --test-dir build --build-config Release --output-on-failure --no-tests=ignore
+        run: ctest --test-dir build --build-config Release --output-on-failure --no-tests=error
 
   tidy:
     name: clang-tidy
@@ -124,11 +125,11 @@ jobs:
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
           cmake --build build --parallel
 
-      # Only our own sources — _deps holds SDL3 and Dear ImGui, whose warnings
-      # are not ours to fix.
+      # Only our own sources — _deps holds SDL3, Dear ImGui and Unity, whose
+      # warnings are not ours to fix.
       - name: Run clang-tidy
         run: |
           run-clang-tidy -p build -quiet \
-            '^${{ github.workspace }}/(kek|game|platform|tools)/' \
+            '^${{ github.workspace }}/(kek|game|platform|tools|tests)/' \
             | tee tidy.log
           echo "### clang-tidy: $(grep -c 'warning:' tidy.log) warnings" >> "$GITHUB_STEP_SUMMARY"

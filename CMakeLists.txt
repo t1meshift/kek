@@ -8,16 +8,30 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Dependencies are resolved by CMake so a fresh clone builds without setup:
 # a system-wide SDL3 is used when present, anything missing is fetched.
-# Turn this OFF to use local copies under ext/ instead (see KEK_SDL3_LOCAL_DIR
-# and KEK_IMGUI_LOCAL_DIR below).
-option(KEK_FETCH_DEPS "Resolve SDL3 and Dear ImGui automatically (system package or FetchContent)" ON)
+# Turn this OFF to use local copies under ext/ instead (see KEK_SDL3_LOCAL_DIR,
+# KEK_IMGUI_LOCAL_DIR and KEK_UNITY_LOCAL_DIR below).
+option(KEK_FETCH_DEPS "Resolve SDL3, Dear ImGui and Unity automatically (system package or FetchContent)" ON)
 set(KEK_SDL3_LOCAL_DIR "${CMAKE_SOURCE_DIR}/ext/SDL3-3.4.2"
     CACHE PATH "Prebuilt SDL3 used when KEK_FETCH_DEPS=OFF")
 set(KEK_IMGUI_LOCAL_DIR "${CMAKE_SOURCE_DIR}/ext/imgui-1.92.6-docking"
     CACHE PATH "Dear ImGui sources used when KEK_FETCH_DEPS=OFF")
 
+set(KEK_UNITY_LOCAL_DIR "${CMAKE_SOURCE_DIR}/ext/Unity-2.6.1"
+    CACHE PATH "Unity sources used when KEK_FETCH_DEPS=OFF")
+
 set(KEK_SDL3_TAG "release-3.4.2" CACHE STRING "SDL3 git tag to fetch")
 set(KEK_IMGUI_TAG "v1.92.6-docking" CACHE STRING "Dear ImGui git tag to fetch")
+set(KEK_UNITY_TAG "v2.6.1" CACHE STRING "Unity (ThrowTheSwitch) git tag to fetch")
+
+# The unit tests need nothing but a C99 compiler and Unity, so they build for
+# any target the engine does. Off in the browser build by default: there is
+# nothing there to run them.
+if(EMSCRIPTEN)
+  set(KEK_BUILD_TESTS_DEFAULT OFF)
+else()
+  set(KEK_BUILD_TESTS_DEFAULT ON)
+endif()
+option(KEK_BUILD_TESTS "Build the engine's unit tests (tests/) and register them with CTest" ${KEK_BUILD_TESTS_DEFAULT})
 
 if(KEK_FETCH_DEPS)
   include(FetchContent)
@@ -63,10 +77,28 @@ if(KEK_FETCH_DEPS)
     FetchContent_MakeAvailable(imgui)
     set(KEK_IMGUI_DIR "${imgui_SOURCE_DIR}")
   endif()
+
+  if(KEK_BUILD_TESTS)
+    # Unity does ship a CMakeLists, but it builds as C11 with -Werror and a
+    # compiler-specific warning list, and adds install rules — none of which
+    # should decide whether our tests build on a toolchain Unity has never
+    # seen. Pointing SOURCE_SUBDIR at src/, which has no CMakeLists, makes
+    # FetchContent_MakeAvailable only download it; tests/CMakeLists.txt builds
+    # the one source file itself, the same way the imgui target is built below.
+    FetchContent_Declare(unity
+      GIT_REPOSITORY https://github.com/ThrowTheSwitch/Unity.git
+      GIT_TAG        ${KEK_UNITY_TAG}
+      GIT_SHALLOW    TRUE
+      SOURCE_SUBDIR  src
+    )
+    FetchContent_MakeAvailable(unity)
+    set(KEK_UNITY_DIR "${unity_SOURCE_DIR}")
+  endif()
 else()
   list(APPEND CMAKE_PREFIX_PATH "${KEK_SDL3_LOCAL_DIR}")
   find_package(SDL3 REQUIRED)
   set(KEK_IMGUI_DIR "${KEK_IMGUI_LOCAL_DIR}")
+  set(KEK_UNITY_DIR "${KEK_UNITY_LOCAL_DIR}")
 endif()
 
 set(KEK_BUFFER_WIDTH 320 CACHE STRING "Framebuffer width in pixels")
@@ -99,8 +131,9 @@ set(
   "${CMAKE_BINARY_DIR}/$<CONFIGURATION>"
 )
 
-# No tests yet — see BACKLOG.md Tier 0. This is here so `ctest --test-dir build`
-# is a working no-op rather than an error, which is what CI runs today.
+# At the top level rather than inside tests/, so `ctest --test-dir build` finds
+# the suite from the build root — which is what CI runs. The tests themselves
+# are added at the end of this file, once the kek target exists.
 enable_testing()
 
 ######## Warnings ########
@@ -313,6 +346,11 @@ if(WIN32)
 endif()
 
 endif() # NOT EMSCRIPTEN
+
+######## Tests ########
+if(KEK_BUILD_TESTS)
+  add_subdirectory(tests)
+endif()
 
 # if(APPLE)
 #   set_target_properties(MyGame PROPERTIES

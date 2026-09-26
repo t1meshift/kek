@@ -85,9 +85,9 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
-      # No tests yet (BACKLOG.md Tier 0). The step is here so the harness is
-      # wired up the day the first one lands; --no-tests=ignore keeps an empty
-      # suite from being an error on every CMake version.
+      # The harness is in tests/ (Unity, registered with CTest) but holds no
+      # suites yet; --no-tests=ignore keeps an empty one from being an error
+      # and goes as soon as the first suite lands.
       - name: Test
         run: ctest --test-dir build --build-config Release --output-on-failure --no-tests=ignore
 

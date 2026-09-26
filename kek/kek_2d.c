@@ -300,6 +300,11 @@ void kek_2d_line(KEK_engine* engine, KEK_IVec2 p0, KEK_IVec2 p1, uint8_t color) 
             y0 = y0 + sy;
         }
     } while ((x1 - x0) * sx > 0 || (y1 - y0) * sy > 0);
+
+    /* The loop steps before it tests, so it stops on arriving at the last
+       pixel without drawing it. The horizontal path above draws both ends,
+       and a line should not lose its end depending on its slope. */
+    kek_blit(engine, x1, y1, color);
 }
 
 /* kek_blit and kek_line do not clip — that is what makes them fast paths, and

@@ -250,6 +250,38 @@ void test_lines_wholly_off_screen_draw_nothing(void) {
     }
 }
 
+/* Both ends, in either direction, and one pixel per step along the major
+   axis — the same count the horizontal fast path has always drawn. */
+void test_a_line_includes_both_ends(void) {
+    const KEK_IVec2 ends[][2] = {
+        { { 2, 3 }, { 12, 3 } },
+        { { 4, 30 }, { 4, 20 } },
+        { { 0, 0 }, { 10, 10 } },
+        { { 0, 0 }, { 10, 3 } },
+        { { 50, 2 }, { 47, 35 } },
+        { { 60, 36 }, { 0, 0 } },
+        { { 9, 9 }, { 9, 9 } }
+    };
+    size_t i;
+    int pass;
+
+    kek_test_frame_attach(&e, 61, 37);
+    for (i = 0; i < sizeof(ends) / sizeof(ends[0]); ++i) {
+        for (pass = 0; pass < 2; ++pass) {
+            KEK_IVec2 from = ends[i][pass], to = ends[i][1 - pass];
+            int dx = to.x > from.x ? to.x - from.x : from.x - to.x;
+            int dy = to.y > from.y ? to.y - from.y : from.y - to.y;
+
+            kek_test_frame_clear(&e);
+            kek_2d_line(&e, from, to, INK);
+            TEST_ASSERT_EQUAL_UINT8(INK, kek_test_frame_pixel(&e, from.x, from.y));
+            TEST_ASSERT_EQUAL_UINT8(INK, kek_test_frame_pixel(&e, to.x, to.y));
+            TEST_ASSERT_EQUAL_INT((dx > dy ? dx : dy) + 1, kek_test_frame_count(&e, INK));
+        }
+    }
+    kek_test_frame_assert_guards();
+}
+
 /* ---- Triangles ---- */
 
 static void triangle(KEK_IVec2 a, KEK_IVec2 b, KEK_IVec2 c) {
@@ -388,6 +420,7 @@ int main(void) {
     RUN_TEST(test_a_circle_larger_than_the_frame_fills_it);
     RUN_TEST(test_lines_across_and_off_every_edge_stay_in_the_frame);
     RUN_TEST(test_lines_wholly_off_screen_draw_nothing);
+    RUN_TEST(test_a_line_includes_both_ends);
     RUN_TEST(test_triangles_wholly_off_each_edge_draw_nothing);
     RUN_TEST(test_triangles_hanging_off_every_edge_stay_in_the_frame);
     RUN_TEST(test_degenerate_triangles_stay_in_the_frame);

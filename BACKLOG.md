@@ -59,8 +59,8 @@ on a 32-bit one, plus whatever the application gives its arena. Nearly all of it
   nearly every public struct, plus [kek_3d.c](kek/kek_3d.c), [kek_2d.c](kek/kek_2d.c),
   [kek_math.c](kek/kek_math.c), the converters and the editor. On-disk formats can stay float and convert
   at load — the loader already visits every vertex.
-- **Order of work.** The arena went first, for Tier 1. Next remove the per-pixel divides and move depth
-  to `uint16`: both are worth doing regardless of arithmetic, and depth is now three quarters of the
+- **Order of work.** The arena went first, for Tier 1, and the per-pixel divides are gone (`0945961`).
+  Next move depth to `uint16`: worth doing regardless of arithmetic, and depth is three quarters of the
   block. Then the data structures. Fixed point last — it is the most cross-cutting change and far easier
   on top of structures that have already shrunk.
 
@@ -86,9 +86,12 @@ on a 32-bit one, plus whatever the application gives its arena. Nearly all of it
   billboards. Needs `kek_2d_blit_texture()` and a transparent colour index.
 - **No scale, no transform type.** `kek_3d_draw_model(e, mdl, camera, pos, rotation)`
   ([kek_3d.h](kek/include/kek_3d.h)) — required before anything can be placed in a world.
-- **Divides in the per-pixel loop** in `kek_3d_triangle` and `kek_3d_triangle_textured` (`w0 / area`,
-  `u_over_z / inv_z`). Precompute `1/area` and move to affine spans with subdivision — the technique Quake
-  used to hide one divide behind sixteen pixels. Measure first; there is no profiling harness.
+- **The sampler is what a textured pixel costs now.** With the divides gone (`0945961`),
+  `kek_texture_sample` is a call into another file per pixel, a branch on the warp mode, `floorf` twice
+  under `REPEAT`, a clamp and two float-to-int conversions — each of those an `fldcw` pair on an x87
+  without SSE3, which is every target. Quake stepped s and t in 16.16 fixed point along the span and
+  masked for wrap; the span loop already has u and v stepping linearly, so it is the same shape. Overlaps
+  with fixed point in Tier 2, and could go first as a local change inside the span.
 - **The depth buffer is the single largest allocation.** 320×200×4 = 250 KB against 62.5 KB for the frame
   itself. Quantised `1/z` in `uint16` halves it and cuts memory traffic in the hot loop. Quake used a
   16-bit z-buffer at this resolution, and only for alias models.
@@ -239,6 +242,7 @@ on the hash has the reasoning, the measurements and what was verified.
 | --- | --- | --- |
 | Resolution hardcoded | `KEK_BUFFER_WIDTH`/`KEK_BUFFER_HEIGHT`/`KEK_TARGET_FPS` were `#define`s at the top of `kek.c`. In `kek_config.h` with the other knobs now, with CMake cache entries | `f99074d` |
 | No lighting | The shading palette was computed at init and `kek_3d_draw_model` never used it. Flat shading from a world-fixed directional light plus ambient, with the normal derived from the face; fog with view depth; Bayer 4×4 dither between rows | `424f69e` |
+| Divides in the per-pixel loop | Three per pixel in `kek_3d_triangle` (`w0 / area`), five in `kek_3d_triangle_textured` (and `u_over_z / inv_z`), and no way to measure them. A benchmark in `bench/`; one divide per triangle, attributes as planes stepped by adds, and perspective divided out every 16 pixels with affine spans between, as in Quake | `954cb4c`, `0945961` |
 
 ### Found on the way, not from a backlog item
 

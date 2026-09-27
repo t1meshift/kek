@@ -12,7 +12,7 @@ These shape several items below, so they are recorded once here.
 
 | Question | Decision |
 | --- | --- |
-| Licence | All rights reserved. The game moves to a private repository; the engine stays open |
+| Licence | All rights reserved. The game lives in its own private repository; this one keeps the engine and a demo |
 | Target machine | Pentium as the primary target, able to run on a 486 |
 | Arithmetic | Fixed point. A 486 has no FPU/integer overlap, and a 486SX has no FPU at all |
 | Tests | Unity (ThrowTheSwitch), C99, fetched like SDL3 and Dear ImGui, driven by CTest. The harness has to build for foreign targets too, which rules out anything needing `fork` or a prebuilt library |
@@ -28,24 +28,18 @@ Nothing open. Tier 1 is next.
 
 ## Tier 1 — Splitting the engine from the game
 
-The game moves to a private repository and the engine stays open. The game is 300 lines today and the
-separation only gets more expensive. Preparation matters more than the move itself.
+Nothing moves out: the scene that was here became the [demo](demo) and stays, and the game starts in its
+own repository against the engine. What is left is making the engine consumable from outside.
 
-- **The platform layer is wired to the game.** [main_sdl.c#L90](platform/main_sdl.c#L90) calls
-  `GAME_init_ctx()` from `<game.h>` directly. Nothing leaves the repository until that is a callback or a
-  config field instead of a known symbol.
-- **`GAME_NAME` is the CMake project name** and the prefix of every target. The project is the engine; the
-  game is a consumer.
+- **The platform layer is wired to the demo.** [main_sdl.c#L91](platform/main_sdl.c#L91) calls
+  `DEMO_init_ctx()` from `<demo.h>` directly. An out-of-tree game cannot reuse the platform layer until
+  that is a callback or a config field instead of a known symbol.
 - **Reorganise the sources.** `kek/io/kek_asset_memory.c` is already there (pure C, no file I/O —
   engine material). What remains is `kek/io/kek_asset_stdio.c` behind `KEK_WITH_STDIO_ASSETS` (stdio is
   not present on every target the engine aims at — this is today's
   [platform_assets_fs.c](platform/platform_assets_fs.c)), and `platform/sdl3/` for the OS backend.
 - **Make the engine installable** — install rules and an export set, so an out-of-tree game can consume it
   through `find_package(kek)` or FetchContent.
-- **A sample in the public repository.** [web-demo.yml](.github/workflows/web-demo.yml) builds the game
-  today; the demo has to survive the move, so `samples/` needs a minimal target that also exercises the
-  platform layer.
-- **Split the assets.** [assets/](assets) currently mixes engine samples and game content.
 
 ## Tier 2 — Target machine: Pentium, running on a 486
 
@@ -72,7 +66,7 @@ roughly 20 KB of actual data.
   an arena has to know the size up front, so it becomes `kek_model_create(e, verts, faces, flags)`. And
   `kek_model_destroy` has no meaning in a bump allocator — there are 17 calls to the destroy functions,
   6 in [kek_file_model.c](kek/kek_file_model.c), 6 in [kek_file_image.c](kek/kek_file_image.c), 2 in the
-  game, and 3 in [kek_pool.c](kek/kek_pool.c) itself, where `kek_model_destroy` now releases a texture
+  demo, and 3 in [kek_pool.c](kek/kek_pool.c) itself, where `kek_model_destroy` now releases a texture
   the model owns. What rescues it: almost all of them are LIFO by construction, since the loaders free exactly what
   they just built on an error path. So a two-ended arena with marks works — permanent data (default cube
   and texture, fonts) from the low end, per-level data from the high end, released wholesale on level
@@ -130,9 +124,9 @@ roughly 20 KB of actual data.
 
 ## Tier 4 — Levels (`.klf`)
 
-There is no world as a concept. Scenes are compiled-in C structs, `GAME_init_scene()`
-([game_scene_loader.c](game/game_scene_loader.c)) is a switch with one case, `GAME_SCENETAG_MENU` and
-`GAME_SCENETAG_SETTINGS` are declared in [game_tag.h](game/include/game_tag.h) and never implemented, and
+There is no world as a concept. Scenes are compiled-in C structs, `DEMO_init_scene()`
+([demo_scene_loader.c](demo/demo_scene_loader.c)) is a switch with one case, `DEMO_SCENETAG_MENU` and
+`DEMO_SCENETAG_SETTINGS` are declared in [demo_tag.h](demo/include/demo_tag.h) and never implemented, and
 rendering is a single hardcoded `kek_3d_draw_model` call.
 
 - An entity/instance concept in the engine: a pooled array of `{model handle, texture handle, transform,
@@ -159,7 +153,7 @@ rendering is a single hardcoded `kek_3d_draw_model` call.
 - An exporter in `scripts/`, from a level source or from the editor.
 - Collision and spatial queries — nothing makes a level walkable. AABBs and a ray cast against model
   bounds are enough to start.
-- Split the camera/player controller out of the scene; `GAME_EntryScene_update` currently does both.
+- Split the camera/player controller out of the scene; `DEMO_EntryScene_update` currently does both.
 
 ## Tier 5 — Editor
 
@@ -174,13 +168,13 @@ rendering is a single hardcoded `kek_3d_draw_model` call.
 - **No file open/save** — no KMF/KIF import, no `.klf` output. SDL3 has `SDL_ShowOpenFileDialog`.
 - **The editor is not built in CI** (it is deliberately absent from the web build).
 
-## Tier 6 — Game (private repository)
+## Tier 6 — Demo
 
-- **There is no shooter in SnusShooter.** One scene: a rotating cat, debug palette bars and camera
-  coordinates ([game_scene_entry.c](game/game_scene_entry.c)). No menu, no HUD, no weapons, no enemies,
-  no game loop, no win or lose.
+The game's own backlog lives with the game. The demo is one scene: a rotating cat, debug palette bars
+and camera coordinates ([demo_scene_entry.c](demo/demo_scene_entry.c)).
+
 - **Cleanup once entities exist**: the dead `if (!e->assets)` at
-  [game_scene_entry.c#L81](game/game_scene_entry.c#L81) and the commented-out multi-model draw.
+  [demo_scene_entry.c#L69](demo/demo_scene_entry.c#L69) and the commented-out multi-model draw.
 
 ## Tier 7 — Later
 
@@ -189,8 +183,8 @@ rendering is a single hardcoded `kek_3d_draw_model` call.
   of short samples in one file behind a shared table, to save space.
 - **A DOS platform layer.** The target is named and the frame format already suits it: VGA mode 13h is
   exactly 320×200 at 256 colours, so presenting is a copy to `0xA0000`, and the 0–63 channel range of
-  `KEK_palette_item` is the VGA DAC range (ports `0x3C8`/`0x3C9`) — though see Tier 0 on its in-memory
-  layout. Build with DJGPP. Other platform layers per the README's "as many platforms as possible"; SDL3
+  `KEK_palette_item` is the VGA DAC range (ports `0x3C8`/`0x3C9`), and 256 of them are the 768-byte block
+  the DAC takes. Build with DJGPP. Other platform layers per the README's "as many platforms as possible"; SDL3
   is the only one so far.
 - **Scripts**: no `requirements.txt` (Pillow is needed), no round-trip tests for `obj_to_kmf` or
   `bmp_to_kif`. The default palette has three copies: the engine's table in
@@ -235,6 +229,14 @@ on the hash has the reasoning, the measurements and what was verified.
 | `KEK_POOL_MODEL_UVS_MAX` meant two things | It sized the per-face `face_textures`, but the loader checked it only against the distinct-UV count; with `UVS_MAX` below `FACES_MAX` a textured model wrote past its slot. `faces_count` is checked too, and a second engine build with small limits proves it under ASan | `89c8fb3` |
 | Backface cull overflowed `int` | `kek_area_triangle_signed` multiplied screen coordinates the near clip had put tens of thousands of pixels out. Wraparound hid it until twice the area passed `INT_MAX`: a wall 35 units off and ~80 tall, not the 18 estimated here, and the back of it drew 2761 pixels. Edge form in `double` | `b51c188` |
 | `kek_texture_sample` cast NaN | The clamp let NaN through and `REPEAT` made NaN of infinity; both reached a `(uint16_t)` cast. NaN now resolves to 0 in both modes | `470d233` |
+
+### Tier 1
+
+| | Was | Commit |
+| --- | --- | --- |
+| Game-named project | `GAME_NAME` was the CMake project name and the prefix of every target. The project is `kek`; the scene became the demo, with targets `kek_demo` and `kek_demo_sdl` | `c4bf800` |
+| A sample in the public repository | The only consumer of the engine was the game, which was to leave. It stays as the demo, and the web demo builds it | `c4bf800` |
+| Mixed assets | `assets/` was to be split into engine samples and game content. Everything in it is the demo's; it is `demo/assets` now | `c4bf800` |
 
 ### Tier 3
 

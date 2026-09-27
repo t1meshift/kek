@@ -37,13 +37,19 @@ float kek_area_triangle(KEK_IVec2 t[3]) {
     return kek_area_triangle_signed(t);
 }
 
+/* The backface cull calls this on vertices the near-plane clip has put tens
+   of thousands of pixels off screen, where the products no longer fit in an
+   int. In double they are exact while coordinates stay within 2^25, some
+   hundreds of times what the clip produces, and the edge form keeps the terms
+   as large as the triangle rather than as far as it is from the origin. Once
+   per triangle, not per pixel. */
 float kek_area_triangle_signed(KEK_IVec2 t[3]) {
-    KEK_IVec2 a, b, c;
-    a = t[0];
-    b = t[1];
-    c = t[2];
+    double abx = (double)t[1].x - (double)t[0].x;
+    double aby = (double)t[1].y - (double)t[0].y;
+    double acx = (double)t[2].x - (double)t[0].x;
+    double acy = (double)t[2].y - (double)t[0].y;
 
-    return ((b.y - a.y)*(b.x + a.x) + (c.y - b.y)*(c.x + b.x) + (a.y - c.y)*(a.x + c.x)) / 2.f;
+    return (float)((abx * acy - acx * aby) / 2.0);
 }
 
 void kek_normalize_fvec3(KEK_FVec3* vec) {

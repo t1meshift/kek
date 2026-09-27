@@ -234,6 +234,52 @@ void test_cubes_through_the_near_plane_and_off_the_edges_stay_in_the_frame(void)
     kek_test_frame_assert_guards();
 }
 
+/* A wall 35 units to the right, 82 tall, running from 50 behind the camera to
+   50 in front, so its far end is on screen and the lateral cull lets it
+   through. The near-plane clip puts vertices on z = 0.1, where each unit of
+   offset is ~1300 px: a clipped triangle reaches (45772, -50832) and twice its
+   area passes INT_MAX. The backface test has to get the sign right anyway:
+   one winding draws, the other draws nothing. */
+static void draw_wall(int facing_camera) {
+    static KEK_FVec3 verts[4] = {
+        { 35.f, -2.f, -50.f }, { 35.f, 80.f, -50.f },
+        { 35.f, 80.f,  50.f }, { 35.f, -2.f,  50.f }
+    };
+    static const KEK_model_face front[2] = { { 0, 2, 1 }, { 0, 3, 2 } };
+    static KEK_model_face faces[2];
+    KEK_camera camera = KEK_DEFAULT_CAMERA;
+    KEK_model wall;
+    KEK_FVec3 zero = { 0.f, 0.f, 0.f };
+    size_t i;
+
+    for (i = 0; i < 2; ++i) {
+        faces[i] = front[i];
+        if (!facing_camera) {
+            faces[i].b = front[i].c;
+            faces[i].c = front[i].b;
+        }
+    }
+
+    memset(&wall, 0, sizeof(wall));
+    wall.verts = verts;
+    wall.faces = faces;
+    wall.verts_count = 4;
+    wall.faces_count = 2;
+    wall.texture = KEK_TEXTURE_HANDLE_INVALID;
+    kek_3d_draw_model(&e, &wall, &camera, zero, zero);
+}
+
+void test_a_huge_wall_across_the_near_plane_is_culled_by_its_winding_alone(void) {
+    draw_wall(1);
+    TEST_ASSERT_GREATER_THAN_INT(0, kek_test_frame_painted(&e));
+    kek_test_frame_assert_guards();
+
+    kek_test_frame_clear(&e);
+    draw_wall(0);
+    TEST_ASSERT_EQUAL_INT(0, kek_test_frame_painted(&e));
+    kek_test_frame_assert_guards();
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_the_nearer_surface_wins_drawn_last);
@@ -248,5 +294,6 @@ int main(void) {
     RUN_TEST(test_a_cube_in_front_of_the_camera_draws);
     RUN_TEST(test_a_cube_behind_the_camera_or_past_the_far_plane_draws_nothing);
     RUN_TEST(test_cubes_through_the_near_plane_and_off_the_edges_stay_in_the_frame);
+    RUN_TEST(test_a_huge_wall_across_the_near_plane_is_culled_by_its_winding_alone);
     return UNITY_END();
 }

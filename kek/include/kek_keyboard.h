@@ -5,6 +5,8 @@
 extern "C" {
 #endif
 
+#include <stdint.h>
+
 /*
 This shit is stolen from SDL3 headers, but you can get it here:
 https://usb.org/sites/default/files/hut1_5.pdf
@@ -126,6 +128,18 @@ typedef enum KEK_scancode {
 
     KEK_SCANCODE_SIZE = 512
 } KEK_scancode;
+
+/* One bit per scancode. Lives inside KEK_engine by value, like the pools'
+   bookkeeping: 192 bytes is not worth a static buffer and a pointer, and this
+   way two engines do not share a keyboard. Read it through kek_key_held() and
+   friends in kek.h — that is where the contract for when edges appear and
+   disappear is written down. Mouse and gamepad state would sit beside it in
+   the engine, not in here. */
+typedef struct KEK_KeyboardState {
+    uint8_t held[KEK_SCANCODE_SIZE / 8];
+    uint8_t pressed[KEK_SCANCODE_SIZE / 8];
+    uint8_t released[KEK_SCANCODE_SIZE / 8];
+} KEK_KeyboardState;
 
 #ifdef __cplusplus
 }

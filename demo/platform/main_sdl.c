@@ -1,8 +1,10 @@
 /*
-SDL3 platform layer. Built as a native executable and, under Emscripten, as a
-browser page; SDL's main callbacks are what make both work from one loop —
-a browser cannot be blocked in a while(1), so SDL_AppIterate hands control back
-after every frame and Emscripten drives it from requestAnimationFrame.
+The demo's SDL3 platform layer. Not part of kek: a game is expected to copy
+this and platform_assets_fs.c and make them its own. Built as a native
+executable and, under Emscripten, as a browser page; SDL's main callbacks are
+what make both work from one loop — a browser cannot be blocked in a while(1),
+so SDL_AppIterate hands control back after every frame and Emscripten drives it
+from requestAnimationFrame.
 */
 #define SDL_MAIN_USE_CALLBACKS 1
 

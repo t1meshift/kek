@@ -74,7 +74,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: deps-${{ matrix.os }}-${{ matrix.cc || 'msvc' }}-${{ hashFiles('CMakeLists.txt') }}
+          key: deps-${{ matrix.os }}-${{ matrix.cc || 'msvc' }}-${{ hashFiles('CMakeLists.txt', 'demo/CMakeLists.txt', 'tools/kek_editor/CMakeLists.txt') }}
 
       - name: Configure
         env:
@@ -126,7 +126,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: deps-tidy-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
+          key: deps-tidy-ubuntu-24.04-${{ hashFiles('CMakeLists.txt', 'demo/CMakeLists.txt', 'tools/kek_editor/CMakeLists.txt') }}
 
       # clang-tidy needs compile_commands.json, which CMAKE_EXPORT_COMPILE_COMMANDS
       # writes; the build has to run first so generated headers exist.
@@ -143,7 +143,7 @@ jobs:
         run: |
           status=0
           run-clang-tidy-${CLANG_TIDY_VERSION} -p build -quiet \
-            '^${{ github.workspace }}/(kek|demo|platform|tools|tests)/' \
+            '^${{ github.workspace }}/(kek|demo|tools|tests)/' \
             > tidy.log 2>&1 || status=$?
           cat tidy.log
           echo "### clang-tidy ${CLANG_TIDY_VERSION}: $(grep -cE ': (warning|error): ' tidy.log) findings" >> "$GITHUB_STEP_SUMMARY"

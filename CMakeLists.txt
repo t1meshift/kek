@@ -1,87 +1,51 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(kek VERSION 0.1.0 LANGUAGES C CXX)
+project(kek VERSION 0.1.0 LANGUAGES C)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Dependencies are resolved by CMake so a fresh clone builds without setup:
-# a system-wide SDL3 is used when present, anything missing is fetched.
-# Turn this OFF to use local copies under ext/ instead (see KEK_SDL3_LOCAL_DIR,
-# KEK_IMGUI_LOCAL_DIR and KEK_UNITY_LOCAL_DIR below).
-option(KEK_FETCH_DEPS "Resolve SDL3, Dear ImGui and Unity automatically (system package or FetchContent)" ON)
-set(KEK_SDL3_LOCAL_DIR "${CMAKE_SOURCE_DIR}/ext/SDL3-3.4.2"
-    CACHE PATH "Prebuilt SDL3 used when KEK_FETCH_DEPS=OFF")
-set(KEK_IMGUI_LOCAL_DIR "${CMAKE_SOURCE_DIR}/ext/imgui-1.92.6-docking"
-    CACHE PATH "Dear ImGui sources used when KEK_FETCH_DEPS=OFF")
+# The library is what this project ships. The demo and the editor are projects
+# of their own that consume it the way a game would (demo/CMakeLists.txt,
+# tools/kek_editor/CMakeLists.txt); in this tree they are added at the end as
+# subdirectories, and they are off when kek is itself someone's subdirectory.
+# PROJECT_IS_TOP_LEVEL would say the same, from CMake 3.21.
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+  set(KEK_IS_TOP_LEVEL ON)
+else()
+  set(KEK_IS_TOP_LEVEL OFF)
+endif()
 
+# Dependencies are resolved by CMake so a fresh clone builds without setup;
+# the library itself has none, the tests need Unity, and demo/ and the editor
+# resolve SDL3 and Dear ImGui under the same switch. Turn this OFF to use local
+# copies under ext/ instead (see KEK_UNITY_LOCAL_DIR below, and
+# KEK_SDL3_LOCAL_DIR and KEK_IMGUI_LOCAL_DIR in those projects).
+option(KEK_FETCH_DEPS "Resolve dependencies automatically (system package or FetchContent)" ON)
 set(KEK_UNITY_LOCAL_DIR "${CMAKE_SOURCE_DIR}/ext/Unity-2.6.1"
     CACHE PATH "Unity sources used when KEK_FETCH_DEPS=OFF")
-
-set(KEK_SDL3_TAG "release-3.4.2" CACHE STRING "SDL3 git tag to fetch")
-set(KEK_IMGUI_TAG "v1.92.6-docking" CACHE STRING "Dear ImGui git tag to fetch")
 set(KEK_UNITY_TAG "v2.6.1" CACHE STRING "Unity (ThrowTheSwitch) git tag to fetch")
 
 # The unit tests need nothing but a C99 compiler and Unity, so they build for
 # any target the engine does. Off in the browser build by default: there is
-# nothing there to run them.
-if(EMSCRIPTEN)
-  set(KEK_BUILD_TESTS_DEFAULT OFF)
+# nothing there to run them. The editor is a desktop tool; a browser build has
+# no use for it.
+if(KEK_IS_TOP_LEVEL AND NOT EMSCRIPTEN)
+  set(KEK_DESKTOP_DEFAULT ON)
 else()
-  set(KEK_BUILD_TESTS_DEFAULT ON)
+  set(KEK_DESKTOP_DEFAULT OFF)
 endif()
-option(KEK_BUILD_TESTS "Build the engine's unit tests (tests/) and register them with CTest" ${KEK_BUILD_TESTS_DEFAULT})
+option(KEK_BUILD_TESTS "Build the engine's unit tests (tests/) and register them with CTest" ${KEK_DESKTOP_DEFAULT})
+option(KEK_BUILD_DEMO "Build the demo (demo/) against this tree's kek" ${KEK_IS_TOP_LEVEL})
+option(KEK_BUILD_EDITOR "Build the editor (tools/kek_editor/) against this tree's kek" ${KEK_DESKTOP_DEFAULT})
 
-if(KEK_FETCH_DEPS)
-  include(FetchContent)
-
-  # An SDL3 installed system-wide is just as good and saves building it from
-  # source; fall back to fetching only when there is none. A host SDL3 is no use
-  # to Emscripten, so that build always goes through the source fetch.
-  if(NOT EMSCRIPTEN)
-    find_package(SDL3 QUIET)
-  endif()
-  if(NOT SDL3_FOUND)
-    if(EMSCRIPTEN)
-      # The page needs video and keyboard and nothing else; every other
-      # subsystem is dead weight in the wasm.
-      set(SDL_AUDIO OFF CACHE BOOL "" FORCE)
-      set(SDL_CAMERA OFF CACHE BOOL "" FORCE)
-      set(SDL_DIALOG OFF CACHE BOOL "" FORCE)
-      set(SDL_HAPTIC OFF CACHE BOOL "" FORCE)
-      set(SDL_JOYSTICK OFF CACHE BOOL "" FORCE)
-      set(SDL_POWER OFF CACHE BOOL "" FORCE)
-      set(SDL_SENSOR OFF CACHE BOOL "" FORCE)
-    endif()
-
-    FetchContent_Declare(SDL3
-      GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-      GIT_TAG        ${KEK_SDL3_TAG}
-      GIT_SHALLOW    TRUE
-    )
-    FetchContent_MakeAvailable(SDL3)
-  endif()
-
-  # Only the editor needs Dear ImGui, and the editor is not part of a browser
-  # build (see the kek_editor section).
-  if(NOT EMSCRIPTEN)
-    FetchContent_Declare(imgui
-      GIT_REPOSITORY https://github.com/ocornut/imgui.git
-      GIT_TAG        ${KEK_IMGUI_TAG}
-      GIT_SHALLOW    TRUE
-    )
-
-    # Dear ImGui ships no CMakeLists; FetchContent_MakeAvailable only downloads it
-    # and the imgui target below is built from ${imgui_SOURCE_DIR}.
-    FetchContent_MakeAvailable(imgui)
-    set(KEK_IMGUI_DIR "${imgui_SOURCE_DIR}")
-  endif()
-
-  if(KEK_BUILD_TESTS)
+if(KEK_BUILD_TESTS)
+  if(KEK_FETCH_DEPS)
+    include(FetchContent)
     # Unity does ship a CMakeLists, but it builds as C11 with -Werror and a
     # compiler-specific warning list, and adds install rules — none of which
     # should decide whether our tests build on a toolchain Unity has never
     # seen. Pointing SOURCE_SUBDIR at src/, which has no CMakeLists, makes
     # FetchContent_MakeAvailable only download it; tests/CMakeLists.txt builds
-    # the one source file itself, the same way the imgui target is built below.
+    # the one source file itself.
     FetchContent_Declare(unity
       GIT_REPOSITORY https://github.com/ThrowTheSwitch/Unity.git
       GIT_TAG        ${KEK_UNITY_TAG}
@@ -90,12 +54,9 @@ if(KEK_FETCH_DEPS)
     )
     FetchContent_MakeAvailable(unity)
     set(KEK_UNITY_DIR "${unity_SOURCE_DIR}")
+  else()
+    set(KEK_UNITY_DIR "${KEK_UNITY_LOCAL_DIR}")
   endif()
-else()
-  list(APPEND CMAKE_PREFIX_PATH "${KEK_SDL3_LOCAL_DIR}")
-  find_package(SDL3 REQUIRED)
-  set(KEK_IMGUI_DIR "${KEK_IMGUI_LOCAL_DIR}")
-  set(KEK_UNITY_DIR "${KEK_UNITY_LOCAL_DIR}")
 endif()
 
 set(KEK_BUFFER_WIDTH 320 CACHE STRING "Framebuffer width in pixels")
@@ -112,31 +73,33 @@ set(KEK_PALETTE_SHADING_LEVELS 4 CACHE STRING "Max shading levels")
 
 # The output directories below are per-configuration, and with a single-config
 # generator (Ninja, Make) $<CONFIG> is empty unless a build type is set — which
-# would drop the binaries straight into ${CMAKE_BINARY_DIR}.
-get_property(KEK_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
-if(NOT KEK_MULTI_CONFIG AND NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Build type" FORCE)
+# would drop the binaries straight into ${CMAKE_BINARY_DIR}. Only for a build of
+# this tree: as someone's subdirectory, where binaries go is theirs to say.
+if(KEK_IS_TOP_LEVEL)
+  get_property(KEK_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+  if(NOT KEK_MULTI_CONFIG AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Build type" FORCE)
+  endif()
+
+  set(
+    CMAKE_RUNTIME_OUTPUT_DIRECTORY
+    "${CMAKE_BINARY_DIR}/$<CONFIGURATION>"
+  )
+
+  set(
+    CMAKE_LIBRARY_OUTPUT_DIRECTORY
+    "${CMAKE_BINARY_DIR}/$<CONFIGURATION>"
+  )
 endif()
-
-set(
-  CMAKE_RUNTIME_OUTPUT_DIRECTORY
-  "${CMAKE_BINARY_DIR}/$<CONFIGURATION>"
-)
-
-set(
-  CMAKE_LIBRARY_OUTPUT_DIRECTORY
-  "${CMAKE_BINARY_DIR}/$<CONFIGURATION>"
-)
 
 # At the top level rather than inside tests/, so `ctest --test-dir build` finds
 # the suite from the build root — which is what CI runs. The tests themselves
-# are added at the end of this file, once the kek target exists.
+# are added further down, once the kek target exists.
 enable_testing()
 
 ######## Warnings ########
-# Applied to the engine, the demo, the platform layer and the editor — but not
-# to the vendored Dear ImGui, whose warnings are not ours to fix. PRIVATE so the
-# flags do not leak into anything linking against kek.
+# Applied to the engine and its tests. PRIVATE so the flags do not leak into
+# anything linking against kek; the demo and the editor have their own copy.
 #
 # MSVC gets /W4 but not /WX yet: nobody has looked at what /W4 has to say about
 # this code, and a red master on a compiler none of us runs is not worth it.
@@ -220,139 +183,10 @@ if(UNIX)
   target_link_libraries(kek PUBLIC m)
 endif()
 
+# The name a consumer uses whichever way it got kek, add_subdirectory or
+# find_package, so demo/ and the editor are written once for both.
+add_library(kek::kek ALIAS kek)
 
-######## The demo ########
-# What the engine can do, in one scene. It is a consumer of the engine like any
-# game would be; the game itself lives in its own repository.
-add_library(kek_demo
-  demo/include/demo_scenes/demo_scene_entry.h
-  demo/include/demo_scene_loader.h
-  demo/include/demo_tag.h
-  demo/include/demo.h
-  demo/demo_scene_entry.c
-  demo/demo_scene_loader.c
-  demo/demo.c
-)
-set_target_properties(kek_demo PROPERTIES 
-  C_STANDARD 99
-  C_STANDARD_REQUIRED ON
-  C_EXTENSIONS OFF
-)
-kek_target_warnings(kek_demo)
-target_include_directories(kek_demo PUBLIC
-  demo/include/
-)
-target_link_libraries(kek_demo PRIVATE kek)
-
-
-######## Platform implementations ########
-# SDL3 executable — platform-agnostic, the only platform layer implemented so far.
-add_executable(kek_demo_sdl
-  platform/main_sdl.c
-  platform/platform_assets_fs.h
-  platform/platform_assets_fs.c
-)
-set_target_properties(kek_demo_sdl PROPERTIES
-  C_STANDARD 11 # Required by SDL3
-  C_STANDARD_REQUIRED ON
-  C_EXTENSIONS OFF
-)
-kek_target_warnings(kek_demo_sdl)
-target_link_libraries(kek_demo_sdl PRIVATE kek kek_demo SDL3::SDL3)
-
-if(WIN32)
-  add_custom_command(
-    TARGET kek_demo_sdl POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:SDL3::SDL3>" "$<TARGET_FILE_DIR:kek_demo_sdl>"
-    VERBATIM
-  )
-endif()
-
-if(EMSCRIPTEN)
-  # The browser build is one self-contained page: index.html + .js + .wasm, with
-  # the assets baked into the module. Nothing is fetched at runtime and
-  # platform_assets_fs.c keeps working unchanged — MEMFS mounts the embedded
-  # files at /assets and the working directory is /, so "./assets/" resolves.
-  set(KEK_WEB_SHELL "${CMAKE_SOURCE_DIR}/platform/web/shell.html")
-  file(GLOB_RECURSE KEK_WEB_ASSET_FILES "${CMAKE_SOURCE_DIR}/demo/assets/*")
-
-  set_target_properties(kek_demo_sdl PROPERTIES
-    OUTPUT_NAME "index"
-    SUFFIX ".html"
-    LINK_DEPENDS "${KEK_WEB_SHELL};${KEK_WEB_ASSET_FILES}"
-  )
-  target_link_options(kek_demo_sdl PRIVATE
-    "--embed-file" "${CMAKE_SOURCE_DIR}/demo/assets@/assets"
-    "--shell-file" "${KEK_WEB_SHELL}"
-    # The 1 MB -sSTACK_SIZE that used to be here was for kek_file_model_load(),
-    # which staged a whole KMF in ~51 KB of locals. That is a static scratch
-    # buffer now and the engine's largest frame is 672 bytes, so Emscripten's
-    # 64 KB default is plenty.
-    # No allocation past startup, so the heap can be fixed instead of growable.
-    "-sINITIAL_MEMORY=33554432"
-    "-sALLOW_MEMORY_GROWTH=0"
-    # SDL_AppIterate returns every frame, so the runtime has to stay alive.
-    "-sEXIT_RUNTIME=0"
-  )
-else()
-  # The demo resolves assets against the working directory (see "./assets/" in
-  # platform/main_sdl.c), so they have to sit next to the executable.
-  add_custom_command(
-    TARGET kek_demo_sdl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E remove_directory
-            "$<TARGET_FILE_DIR:kek_demo_sdl>/assets"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_SOURCE_DIR}/demo/assets"
-            "$<TARGET_FILE_DIR:kek_demo_sdl>/assets"
-    COMMENT "Replacing assets directory next to kek_demo_sdl"
-  )
-endif()
-
-# The editor is a desktop tool; a browser build has no use for it and Dear ImGui
-# would only be dead weight in the page.
-if(NOT EMSCRIPTEN)
-
-######## ImGui ########
-add_library(imgui
-  ${KEK_IMGUI_DIR}/imgui.cpp
-  ${KEK_IMGUI_DIR}/imgui_draw.cpp
-  ${KEK_IMGUI_DIR}/imgui_tables.cpp
-  ${KEK_IMGUI_DIR}/imgui_widgets.cpp
-  ${KEK_IMGUI_DIR}/backends/imgui_impl_sdl3.cpp
-  ${KEK_IMGUI_DIR}/backends/imgui_impl_sdlrenderer3.cpp
-)
-set_target_properties(imgui PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-target_include_directories(imgui PUBLIC
-  ${KEK_IMGUI_DIR}
-  ${KEK_IMGUI_DIR}/backends
-)
-target_link_libraries(imgui PUBLIC SDL3::SDL3)
-
-######## kek_editor ########
-add_executable(kek_editor
-  tools/kek_editor/main.cpp
-)
-set_target_properties(kek_editor PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-kek_target_warnings(kek_editor)
-target_link_libraries(kek_editor PRIVATE kek SDL3::SDL3 imgui)
-
-if(WIN32)
-  add_custom_command(
-    TARGET kek_editor POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:SDL3::SDL3>" "$<TARGET_FILE_DIR:kek_editor>"
-    VERBATIM
-  )
-endif()
-
-endif() # NOT EMSCRIPTEN
 
 ######## Tests ########
 if(KEK_BUILD_TESTS)
@@ -404,15 +238,10 @@ if(KEK_BUILD_TESTS)
   add_subdirectory(tests)
 endif()
 
-# if(APPLE)
-#   set_target_properties(MyGame PROPERTIES
-#     INSTALL_RPATH "@executable_path;@loader_path"
-#     BUILD_WITH_INSTALL_RPATH TRUE
-#     MACOSX_RPATH TRUE
-#   )
-# elseif(UNIX)
-#   set_target_properties(MyGame PROPERTIES
-#     INSTALL_RPATH "$ORIGIN"
-#     BUILD_WITH_INSTALL_RPATH TRUE
-#   )
-# endif()
+######## Consumers ########
+if(KEK_BUILD_DEMO)
+  add_subdirectory(demo)
+endif()
+if(KEK_BUILD_EDITOR)
+  add_subdirectory(tools/kek_editor)
+endif()

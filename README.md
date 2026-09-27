@@ -6,11 +6,10 @@
 KEK is a 2D/3D software renderer/engine written in pure C99 with no dynamic allocations. It draws into a 320×200 framebuffer with a 256-color palette and targets 30 FPS. The goal is to run on as many platforms as possible with almost non-existent CPU and memory requirements.
 
 ## Structure
-Right now, it has 4 components:
-- `kek/` — the engine itself: rasterization (2D and 3D), math, pool allocator, model/image/palette/font handling
-- `demo/` — a demo scene and its assets: what the engine can do, and a consumer of it the way a game would be. The game itself lives in a separate repository
-- `platform/` — platform implementation files (SDL3 for now; builds on Windows, Linux and, through Emscripten, the browser)
-- `tools/kek_editor/` — an editor built on Dear ImGui (C++20) that links against the engine. The shell and the tool-plugin architecture work; the scene and model tools are still stubs.
+The library is the product; everything else consumes it.
+- `kek/` — the library: rasterization (2D and 3D), math, pool allocator, model/image/palette/font handling. No platform code and no dependencies
+- `demo/` — a demo scene, its assets and the SDL3 platform layer that runs it on Windows, Linux and, through Emscripten, the browser. None of it is part of the library: a game starts from a copy of `demo/platform/`. The game itself lives in a separate repository
+- `tools/kek_editor/` — an editor built on Dear ImGui (C++20) that links against the library. The shell and the tool-plugin architecture work; the scene and model tools are still stubs.
 
 `scripts/` holds the asset converters: `obj_to_kmf.py` (models), `bmp_to_kif.py` (images), `bdf_to_c.py` (fonts), `palette_to_bmp.py`.
 
@@ -22,7 +21,7 @@ The engine targets a Pentium and should still run on a 486, which settles a few 
 
 ## Building
 
-Requires CMake 3.20+ and a C99 / C++20 toolchain. CMake uses a system-wide SDL3 if you have one and builds it from source otherwise; it always fetches Dear ImGui. A fresh clone needs no setup:
+Requires CMake 3.20+ and a C99 / C++20 toolchain. The top-level `CMakeLists.txt` builds the library and its tests, and adds the demo and the editor, which are projects of their own (`demo/CMakeLists.txt`, `tools/kek_editor/CMakeLists.txt`); `-DKEK_BUILD_DEMO=OFF`, `-DKEK_BUILD_EDITOR=OFF` and `-DKEK_BUILD_TESTS=OFF` leave any of them out. Added to another project with `add_subdirectory`, it builds the library alone, as `kek::kek`. The demo and the editor use a system-wide SDL3 if you have one and build it from source otherwise; the editor always fetches Dear ImGui. A fresh clone needs no setup:
 
 ```sh
 cmake -B build
@@ -48,7 +47,7 @@ cd build/Debug && ./kek_demo_sdl
 ### Browser build
 
 The SDL3 platform layer also builds for the web through Emscripten, so the same
-`platform/main_sdl.c` produces the desktop executable and the demo page. With
+`demo/platform/main_sdl.c` produces the desktop executable and the demo page. With
 `emcc` on PATH:
 
 ```sh

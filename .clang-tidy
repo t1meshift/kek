@@ -45,7 +45,7 @@ Checks: >
 # stream, snprintf into a debug overlay — say so with a (void) cast; see
 # AllowCastToVoid below.
 
-HeaderFilterRegex: '.*/(kek|demo|platform)/.*\.h$'
+HeaderFilterRegex: '.*/(kek|demo)/.*\.h$'
 # The filter matches on the absolute path, and a checkout of a repository
 # named kek is itself a /kek/ directory — on the CI runner every header under
 # build/_deps (SDL3, Unity) matched it. Fetched dependencies are never ours.

@@ -20,26 +20,30 @@ These shape several items below, so they are recorded once here.
 | Level format | `.klf`, magic `KLVL`, by analogy with `.kmf`/`KMDL` and `.kif`/`KIMG` |
 | Audio | Own format, most likely sound banks |
 | 2D coordinates | Screen pixels. `kek_2d_triangle` overflows `int` past ~46,000 px on both axes and stays that way: no screen-space caller gets near it. Noted in [kek_2d.h](kek/include/kek_2d.h) |
+| Library boundary | The library is the product: `kek/` and nothing that needs an OS. Platform layers and asset providers over stdio belong to consumers — the demo has its own, and a game copies them rather than linking against them |
+| Memory | The application owns all of it. The library keeps no storage of its own; every buffer it uses is handed to it, so each target decides where memory comes from |
+| Distribution | A CMake package: `find_package(kek)`, `kek::kek`. The demo and the editor are separate projects that consume it; the editor ships as binaries through GitHub Releases. DJGPP gets a build file of its own when it comes to that |
 | Handle generations | 16 bits per slot, so a stale handle comes back to life after 65,536 reuses of one slot. That is 256 times what San Andreas allowed itself, for far smaller pools; not worth widening |
 
 ## Tier 0 — Foundation
 
 Nothing open. Tier 1 is next.
 
-## Tier 1 — Splitting the engine from the game
+## Tier 1 — The engine as a library
 
-Nothing moves out: the scene that was here became the [demo](demo) and stays, and the game starts in its
-own repository against the engine. What is left is making the engine consumable from outside.
+The library builds alone and installs as a package, and the demo builds against it in CI. What is left
+is the memory.
 
-- **The platform layer is wired to the demo.** [main_sdl.c#L91](platform/main_sdl.c#L91) calls
-  `DEMO_init_ctx()` from `<demo.h>` directly. An out-of-tree game cannot reuse the platform layer until
-  that is a callback or a config field instead of a known symbol.
-- **Reorganise the sources.** `kek/io/kek_asset_memory.c` is already there (pure C, no file I/O —
-  engine material). What remains is `kek/io/kek_asset_stdio.c` behind `KEK_WITH_STDIO_ASSETS` (stdio is
-  not present on every target the engine aims at — this is today's
-  [platform_assets_fs.c](platform/platform_assets_fs.c)), and `platform/sdl3/` for the OS backend.
-- **Make the engine installable** — install rules and an export set, so an out-of-tree game can consume it
-  through `find_package(kek)` or FetchContent.
+- **The library keeps its own storage.** Frame and depth buffers, the palette and the shading palette in
+  [kek.c](kek/kek.c), both pools in [kek_pool.c](kek/kek_pool.c), and two scratch buffers: the view-space
+  vertices in `kek_3d_draw_model` and the KMF loader's staging area. Their sizes come from `KEK_*`
+  compile definitions that are baked into the installed package, so one build of kek serves one set of
+  sizes and one engine per process. The application should hand all of it over at init — something like
+  `kek_init(&e, &config)` with the buffers, their dimensions and one block of memory for the rest.
+  Buffers first: the rasteriser already goes through `e->w`/`e->h`, and the tests already attach frames
+  of their own, so that part is close to mechanical. The pools come second, and they are Tier 2's arena
+  item with the arena's memory supplied by the application instead of a static array; the two are one
+  change, not two.
 
 ## Tier 2 — Target machine: Pentium, running on a 486
 
@@ -58,9 +62,10 @@ roughly 20 KB of actual data.
   vertices, 1024 faces, 1024 normals, 1024 colours, 1024 UVs. The built-in cube — 8 vertices, 12 faces,
   [kek_model.c#L149](kek/kek_model.c#L149) — is 972 bytes of real data, an overhead of **×90**. A texture
   slot is 65,560 bytes against 256 bytes for the default 16×16 texture, **×256**. Replace N worst-case
-  slots with one static arena allocated sequentially with marks — the Quake `Hunk_Alloc` model, reset on
-  level change. This is still "no dynamic allocation" in the sense the project means: a bump allocator
-  over a static array, deterministic, no free list, no fragmentation.
+  slots with one arena allocated sequentially with marks — the Quake `Hunk_Alloc` model, reset on
+  level change. The block is the application's (Tier 1), typically a static array of its own. This is
+  still "no dynamic allocation" in the sense the project means: a bump allocator over memory handed in
+  once, deterministic, no free list, no fragmentation.
 
   The expensive part is the API, not the allocator. `kek_model_create(e)` hands back a worst-case slot;
   an arena has to know the size up front, so it becomes `kek_model_create(e, verts, faces, flags)`. And
@@ -163,10 +168,11 @@ rendering is a single hardcoded `kek_3d_draw_model` call.
   `DemoTool` with its palette editor all work.
 - **The keystone is missing: nothing renders the engine framebuffer into ImGui.** Both tools need it and
   it is written once, as `components/engine_viewport.h`. `app_build_palette()` at
-  [main_sdl.c#L35](platform/main_sdl.c#L35) is the same palette expansion, so it should move into the
-  engine as `kek_palette_to_rgbx8888` and be shared.
+  [main_sdl.c#L38](demo/platform/main_sdl.c#L38) is the same palette expansion. It needs no OS, so it
+  can move into the library as `kek_palette_to_rgbx8888` and be shared.
 - **No file open/save** — no KMF/KIF import, no `.klf` output. SDL3 has `SDL_ShowOpenFileDialog`.
-- **The editor is not built in CI** (it is deliberately absent from the web build).
+- **Releases.** Editor binaries through GitHub Releases, built against the installed package the way
+  CI builds the demo. Nothing publishes them yet.
 
 ## Tier 6 — Demo
 
@@ -181,11 +187,11 @@ and camera coordinates ([demo_scene_entry.c](demo/demo_scene_entry.c)).
 - **No audio at all**; `SDL_AUDIO` is explicitly disabled in the web build
   ([CMakeLists.txt](CMakeLists.txt)). Own format by analogy with KMF/KIF, most likely sound banks — a set
   of short samples in one file behind a shared table, to save space.
-- **A DOS platform layer.** The target is named and the frame format already suits it: VGA mode 13h is
+- **A DOS platform layer for the demo**, next to its SDL3 one. The target is named and the frame format already suits it: VGA mode 13h is
   exactly 320×200 at 256 colours, so presenting is a copy to `0xA0000`, and the 0–63 channel range of
   `KEK_palette_item` is the VGA DAC range (ports `0x3C8`/`0x3C9`), and 256 of them are the 768-byte block
-  the DAC takes. Build with DJGPP. Other platform layers per the README's "as many platforms as possible"; SDL3
-  is the only one so far.
+  the DAC takes. Build with DJGPP, from a build file of its own for the library: the CMake package does
+  not reach there.
 - **Scripts**: no `requirements.txt` (Pillow is needed), no round-trip tests for `obj_to_kmf` or
   `bmp_to_kif`. The default palette has three copies: the engine's table in
   [kek_palette.c](kek/kek_palette.c), a string in [palette_to_bmp.py](scripts/palette_to_bmp.py) parsed
@@ -196,6 +202,12 @@ and camera coordinates ([demo_scene_entry.c](demo/demo_scene_entry.c)).
   lookup per pixel and lets the normals go (Tier 2). Smooth models would want a shade per corner, and the
   interpolation is already there for fog. The normals can come back small: Quake stored a vertex normal
   as a byte indexing a table of 162 directions.
+- **How much of libc the library needs** — `needs a decision`. Today: the freestanding headers
+  (`stdint.h`, `stddef.h`, `limits.h`), `memcpy`/`memset` and one `strcmp` in the in-memory asset
+  provider, plus libm, which Tier 3's transcendentals item removes. GCC and Clang emit calls to
+  `memcpy`/`memset`/`memmove`/`memcmp` even under `-ffreestanding`, so "no libc" means those four come
+  from the platform or from kek. A CI build of the library with `-ffreestanding -nostdlib` would keep it
+  honest either way.
 - **Docs**: CONTRIBUTING.
 
 ## Done
@@ -237,6 +249,9 @@ on the hash has the reasoning, the measurements and what was verified.
 | Game-named project | `GAME_NAME` was the CMake project name and the prefix of every target. The project is `kek`; the scene became the demo, with targets `kek_demo` and `kek_demo_sdl` | `c4bf800` |
 | A sample in the public repository | The only consumer of the engine was the game, which was to leave. It stays as the demo, and the web demo builds it | `c4bf800` |
 | Mixed assets | `assets/` was to be split into engine samples and game content. Everything in it is the demo's; it is `demo/assets` now | `c4bf800` |
+| Platform layer wired to the game | `main_sdl.c` called the game's init from `<game.h>`, and the plan was a callback so a game could reuse it. The platform layer was never library code: it is the demo's, in `demo/platform`, and a game copies it. The stdio asset provider went with it rather than into `kek/io` | `8c104d4` |
+| Everything in one CMake project | The top-level CMakeLists built engine, game, platform layer and editor as one. It builds the library and its tests; the demo and the editor are projects of their own over `kek::kek`, and as someone's subdirectory kek builds the library alone | `8c104d4` |
+| Not installable | No install rules, no package. `cmake --install` and `find_package(kek)`; Native CI builds the demo against the install | `3b65957` |
 
 ### Tier 3
 

@@ -165,128 +165,229 @@ char kek_3d_project_vertex(KEK_engine* engine, KEK_camera* camera, KEK_FVec3 p, 
     return 1;
 }
 
+/* What both rasterisers need of a triangle before its first pixel: the
+   bounding box clipped to the frame, and the three edge functions — their
+   values at the box's top-left corner and how much they change per pixel.
+   Edge i is the one opposite vertex i, so w[i] / area is vertex i's weight. */
+typedef struct KEK_3D_Setup_ {
+    int min_x, min_y, max_x, max_y;
+    float w[3];
+    float step_x[3];
+    float step_y[3];
+    /* The one divide a triangle costs; every weight is a multiply by it. */
+    float inv_area;
+} KEK_3D_Setup_;
+
+/* An attribute across the triangle: its value at the box's top-left corner
+   and its change per pixel along x and y. Every attribute the rasterisers
+   interpolate — 1/z, u/z, v/z, the shade — is linear in screen space, so
+   this is the vertices weighted by the edge functions, worked out once per
+   triangle instead of once per pixel. */
+typedef struct KEK_3D_Plane_ {
+    float origin, dx, dy;
+} KEK_3D_Plane_;
+
+static int kek_3d_setup(const KEK_engine* engine, const KEK_3D_ProjectedVertex vertices[3], KEK_3D_Setup_* s) {
+    KEK_IVec2 v0 = vertices[0].screen, v1 = vertices[1].screen, v2 = vertices[2].screen;
+    float area = kek_3d_edge_function(v0, v1, v2.x, v2.y);
+
+    if (area == 0.f) {
+        return 0;
+    }
+
+    s->min_x = KEK_MAX(KEK_MIN(KEK_MIN(v0.x, v1.x), v2.x), 0);
+    s->min_y = KEK_MAX(KEK_MIN(KEK_MIN(v0.y, v1.y), v2.y), 0);
+    s->max_x = KEK_MIN(KEK_MAX(KEK_MAX(v0.x, v1.x), v2.x), engine->w - 1);
+    s->max_y = KEK_MIN(KEK_MAX(KEK_MAX(v0.y, v1.y), v2.y), engine->h - 1);
+
+    s->step_x[0] = (float)(v2.y - v1.y);
+    s->step_y[0] = (float)(v1.x - v2.x);
+    s->step_x[1] = (float)(v0.y - v2.y);
+    s->step_y[1] = (float)(v2.x - v0.x);
+    s->step_x[2] = (float)(v1.y - v0.y);
+    s->step_y[2] = (float)(v0.x - v1.x);
+    s->w[0] = kek_3d_edge_function(v1, v2, s->min_x, s->min_y);
+    s->w[1] = kek_3d_edge_function(v2, v0, s->min_x, s->min_y);
+    s->w[2] = kek_3d_edge_function(v0, v1, s->min_x, s->min_y);
+    s->inv_area = 1.f / area;
+    return 1;
+}
+
+static KEK_3D_Plane_ kek_3d_plane(const KEK_3D_Setup_* s, float a0, float a1, float a2) {
+    KEK_3D_Plane_ p;
+
+    p.origin = (s->w[0] * a0 + s->w[1] * a1 + s->w[2] * a2) * s->inv_area;
+    p.dx = (s->step_x[0] * a0 + s->step_x[1] * a1 + s->step_x[2] * a2) * s->inv_area;
+    p.dy = (s->step_y[0] * a0 + s->step_y[1] * a1 + s->step_y[2] * a2) * s->inv_area;
+    return p;
+}
+
+/* Its value at (x, y), for the start of a row or a span. Per pixel along a
+   row it is stepped by dx instead. */
+static float kek_3d_plane_at(KEK_3D_Plane_ p, const KEK_3D_Setup_* s, int x, int y) {
+    return p.origin + p.dx * (float)(x - s->min_x) + p.dy * (float)(y - s->min_y);
+}
+
+/* Inside, or on an edge, in either winding. */
+static int kek_3d_covered(float w0, float w1, float w2) {
+    return !((w0 < 0.f || w1 < 0.f || w2 < 0.f) && (w0 > 0.f || w1 > 0.f || w2 > 0.f));
+}
+
 void kek_3d_triangle(KEK_engine* engine, KEK_3D_ProjectedVertex vertices[3], uint8_t color_fill) {
-    int min_x = engine->w - 1;
-    int min_y = engine->h - 1;
-    int max_x = 0;
-    int max_y = 0;
-    KEK_IVec2 screen_vertices[3];
-    float area;
+    KEK_3D_Setup_ s;
+    KEK_3D_Plane_ depth, shade;
     int shade_fixed;
     int shade_uniform = kek_3d_shade_uniform(vertices, &shade_fixed);
+    float row_w0, row_w1, row_w2;
 
-    for (int i = 0; i < 3; ++i) {
-        screen_vertices[i] = vertices[i].screen;
-        if (screen_vertices[i].x < min_x) min_x = screen_vertices[i].x;
-        if (screen_vertices[i].y < min_y) min_y = screen_vertices[i].y;
-        if (screen_vertices[i].x > max_x) max_x = screen_vertices[i].x;
-        if (screen_vertices[i].y > max_y) max_y = screen_vertices[i].y;
-    }
-
-    if (min_x < 0) min_x = 0;
-    if (min_y < 0) min_y = 0;
-    if (max_x >= engine->w) max_x = engine->w - 1;
-    if (max_y >= engine->h) max_y = engine->h - 1;
-
-    area = kek_3d_edge_function(screen_vertices[0], screen_vertices[1], screen_vertices[2].x, screen_vertices[2].y);
-    if (area == 0.f) {
+    if (!kek_3d_setup(engine, vertices, &s)) {
         return;
     }
+    depth = kek_3d_plane(&s, vertices[0].inv_z, vertices[1].inv_z, vertices[2].inv_z);
+    shade = kek_3d_plane(&s, vertices[0].shade, vertices[1].shade, vertices[2].shade);
+    row_w0 = s.w[0];
+    row_w1 = s.w[1];
+    row_w2 = s.w[2];
 
-    /* Precompute per-edge step increments: d(edge)/dx and d(edge)/dy are constants */
-    {
-        float step_w0_x = (float)(screen_vertices[2].y - screen_vertices[1].y);
-        float step_w0_y = (float)(screen_vertices[1].x - screen_vertices[2].x);
-        float step_w1_x = (float)(screen_vertices[0].y - screen_vertices[2].y);
-        float step_w1_y = (float)(screen_vertices[2].x - screen_vertices[0].x);
-        float step_w2_x = (float)(screen_vertices[1].y - screen_vertices[0].y);
-        float step_w2_y = (float)(screen_vertices[0].x - screen_vertices[1].x);
-        float row_w0 = kek_3d_edge_function(screen_vertices[1], screen_vertices[2], min_x, min_y);
-        float row_w1 = kek_3d_edge_function(screen_vertices[2], screen_vertices[0], min_x, min_y);
-        float row_w2 = kek_3d_edge_function(screen_vertices[0], screen_vertices[1], min_x, min_y);
-
-        for (int y = min_y; y <= max_y; ++y) {
-            float w0 = row_w0, w1 = row_w1, w2 = row_w2;
-            for (int x = min_x; x <= max_x; ++x) {
-                if (!((w0 < 0.f || w1 < 0.f || w2 < 0.f) &&
-                      (w0 > 0.f || w1 > 0.f || w2 > 0.f))) {
-                    float nw0 = w0 / area, nw1 = w1 / area, nw2 = w2 / area;
-                    float inv_z = nw0 * vertices[0].inv_z + nw1 * vertices[1].inv_z + nw2 * vertices[2].inv_z;
-                    if (kek_3d_depth_test(engine, (uint16_t)x, (uint16_t)y, inv_z)) {
-                        int shade = shade_uniform ? shade_fixed : kek_3d_shade_fixed(
-                            nw0 * vertices[0].shade + nw1 * vertices[1].shade + nw2 * vertices[2].shade);
-                        kek_blit(engine, (uint16_t)x, (uint16_t)y, kek_3d_shade_row(engine, shade, x, y)[color_fill]);
-                    }
-                }
-                w0 += step_w0_x; w1 += step_w1_x; w2 += step_w2_x;
+    for (int y = s.min_y; y <= s.max_y; ++y) {
+        float w0 = row_w0, w1 = row_w1, w2 = row_w2;
+        float inv_z = kek_3d_plane_at(depth, &s, s.min_x, y);
+        float shade_here = kek_3d_plane_at(shade, &s, s.min_x, y);
+        for (int x = s.min_x; x <= s.max_x; ++x) {
+            if (kek_3d_covered(w0, w1, w2) &&
+                kek_3d_depth_test(engine, (uint16_t)x, (uint16_t)y, inv_z)) {
+                int level = shade_uniform ? shade_fixed : kek_3d_shade_fixed(shade_here);
+                kek_blit(engine, (uint16_t)x, (uint16_t)y, kek_3d_shade_row(engine, level, x, y)[color_fill]);
             }
-            row_w0 += step_w0_y; row_w1 += step_w1_y; row_w2 += step_w2_y;
+            w0 += s.step_x[0]; w1 += s.step_x[1]; w2 += s.step_x[2];
+            inv_z += depth.dx;
+            shade_here += shade.dx;
         }
+        row_w0 += s.step_y[0]; row_w1 += s.step_y[1]; row_w2 += s.step_y[2];
+    }
+}
+
+/* Perspective-correct u and v are divided out every KEK_3D_SPAN pixels and
+   stepped linearly in between, which is how Quake hid one divide behind
+   sixteen pixels. Within a span the texture is affine: at this resolution,
+   and with a span this short, the error is a fraction of a texel. */
+#define KEK_3D_SPAN 16
+
+/* 1/n for the last, shorter span of a row, where the step is over n pixels
+   rather than KEK_3D_SPAN: a table, so that span costs no divide either. */
+static const float KEK_3D_RECIPROCAL[KEK_3D_SPAN] = {
+    0.f, 1.f / 1.f, 1.f / 2.f, 1.f / 3.f, 1.f / 4.f, 1.f / 5.f, 1.f / 6.f, 1.f / 7.f,
+    1.f / 8.f, 1.f / 9.f, 1.f / 10.f, 1.f / 11.f, 1.f / 12.f, 1.f / 13.f, 1.f / 14.f, 1.f / 15.f
+};
+
+typedef struct KEK_3D_TexturePlanes_ {
+    KEK_3D_Plane_ inv_z, u_over_z, v_over_z, shade;
+    int shade_fixed;
+    int shade_uniform;
+} KEK_3D_TexturePlanes_;
+
+/* u and v at (x, y): the one divide per span. 1/z is positive wherever the
+   triangle is, since every vertex is past the near plane; the guard is for a
+   value that rounding has brought to zero, which samples the corner rather
+   than an infinity. */
+static void kek_3d_perspective(const KEK_3D_TexturePlanes_* p, const KEK_3D_Setup_* s, int x, int y,
+                               float* out_u, float* out_v) {
+    float inv_z = kek_3d_plane_at(p->inv_z, s, x, y);
+    float z = fabsf(inv_z) >= KEK_EPSILON ? 1.f / inv_z : 0.f;
+
+    *out_u = kek_3d_plane_at(p->u_over_z, s, x, y) * z;
+    *out_v = kek_3d_plane_at(p->v_over_z, s, x, y) * z;
+}
+
+/* One row's covered pixels, first to last, with the edge functions as they
+   stood at the first. The ends of each span are always inside the row's
+   covered stretch, so the divide never sees 1/z extrapolated past the
+   triangle, where it can reach zero. */
+static void kek_3d_textured_row(KEK_engine* engine, const KEK_texture* texture, const KEK_3D_Setup_* s,
+                                const KEK_3D_TexturePlanes_* p, int y, int first, int last,
+                                float w0, float w1, float w2) {
+    float inv_z = kek_3d_plane_at(p->inv_z, s, first, y);
+    float shade = kek_3d_plane_at(p->shade, s, first, y);
+    float u, v;
+    int x = first;
+
+    kek_3d_perspective(p, s, x, y, &u, &v);
+    while (x <= last) {
+        int count = last - x + 1;
+        float u_end, v_end, du, dv, step;
+
+        /* A full span ends on the first pixel of the next, which is where
+           that one starts; the last ends on the row's last pixel. */
+        if (count > KEK_3D_SPAN) {
+            count = KEK_3D_SPAN;
+            kek_3d_perspective(p, s, x + KEK_3D_SPAN, y, &u_end, &v_end);
+            step = 1.f / (float)KEK_3D_SPAN;
+        } else {
+            kek_3d_perspective(p, s, last, y, &u_end, &v_end);
+            step = KEK_3D_RECIPROCAL[count - 1];
+        }
+        du = (u_end - u) * step;
+        dv = (v_end - v) * step;
+
+        for (int i = 0; i < count; ++i, ++x) {
+            if (kek_3d_covered(w0, w1, w2) && fabsf(inv_z) >= KEK_EPSILON &&
+                kek_3d_depth_test(engine, (uint16_t)x, (uint16_t)y, inv_z)) {
+                uint8_t texel = kek_texture_sample(engine, texture, u, v);
+                int level = p->shade_uniform ? p->shade_fixed : kek_3d_shade_fixed(shade);
+                kek_blit(engine, (uint16_t)x, (uint16_t)y, kek_3d_shade_row(engine, level, x, y)[texel]);
+            }
+            w0 += s->step_x[0]; w1 += s->step_x[1]; w2 += s->step_x[2];
+            inv_z += p->inv_z.dx;
+            shade += p->shade.dx;
+            u += du;
+            v += dv;
+        }
+        /* Exact again for the next span rather than carrying the drift. */
+        u = u_end;
+        v = v_end;
     }
 }
 
 void kek_3d_triangle_textured(KEK_engine* engine, KEK_3D_ProjectedVertex vertices[3], const KEK_texture* texture) {
-    int min_x = engine->w - 1;
-    int min_y = engine->h - 1;
-    int max_x = 0;
-    int max_y = 0;
-    KEK_IVec2 screen_vertices[3];
-    float area;
-    int shade_fixed;
-    int shade_uniform = kek_3d_shade_uniform(vertices, &shade_fixed);
+    KEK_3D_Setup_ s;
+    KEK_3D_TexturePlanes_ p;
+    float row_w0, row_w1, row_w2;
 
-    for (int i = 0; i < 3; ++i) {
-        screen_vertices[i] = vertices[i].screen;
-        if (screen_vertices[i].x < min_x) min_x = screen_vertices[i].x;
-        if (screen_vertices[i].y < min_y) min_y = screen_vertices[i].y;
-        if (screen_vertices[i].x > max_x) max_x = screen_vertices[i].x;
-        if (screen_vertices[i].y > max_y) max_y = screen_vertices[i].y;
-    }
-
-    if (min_x < 0) min_x = 0;
-    if (min_y < 0) min_y = 0;
-    if (max_x >= engine->w) max_x = engine->w - 1;
-    if (max_y >= engine->h) max_y = engine->h - 1;
-
-    area = kek_3d_edge_function(screen_vertices[0], screen_vertices[1], screen_vertices[2].x, screen_vertices[2].y);
-    if (area == 0.f) {
+    if (!kek_3d_setup(engine, vertices, &s)) {
         return;
     }
+    p.inv_z = kek_3d_plane(&s, vertices[0].inv_z, vertices[1].inv_z, vertices[2].inv_z);
+    p.u_over_z = kek_3d_plane(&s, vertices[0].u_over_z, vertices[1].u_over_z, vertices[2].u_over_z);
+    p.v_over_z = kek_3d_plane(&s, vertices[0].v_over_z, vertices[1].v_over_z, vertices[2].v_over_z);
+    p.shade = kek_3d_plane(&s, vertices[0].shade, vertices[1].shade, vertices[2].shade);
+    p.shade_uniform = kek_3d_shade_uniform(vertices, &p.shade_fixed);
+    row_w0 = s.w[0];
+    row_w1 = s.w[1];
+    row_w2 = s.w[2];
 
-    {
-        float step_w0_x = (float)(screen_vertices[2].y - screen_vertices[1].y);
-        float step_w0_y = (float)(screen_vertices[1].x - screen_vertices[2].x);
-        float step_w1_x = (float)(screen_vertices[0].y - screen_vertices[2].y);
-        float step_w1_y = (float)(screen_vertices[2].x - screen_vertices[0].x);
-        float step_w2_x = (float)(screen_vertices[1].y - screen_vertices[0].y);
-        float step_w2_y = (float)(screen_vertices[0].x - screen_vertices[1].x);
-        float row_w0 = kek_3d_edge_function(screen_vertices[1], screen_vertices[2], min_x, min_y);
-        float row_w1 = kek_3d_edge_function(screen_vertices[2], screen_vertices[0], min_x, min_y);
-        float row_w2 = kek_3d_edge_function(screen_vertices[0], screen_vertices[1], min_x, min_y);
+    for (int y = s.min_y; y <= s.max_y; ++y) {
+        float w0 = row_w0, w1 = row_w1, w2 = row_w2;
+        float first_w0 = 0.f, first_w1 = 0.f, first_w2 = 0.f;
+        int first = -1, last = -1;
 
-        for (int y = min_y; y <= max_y; ++y) {
-            float w0 = row_w0, w1 = row_w1, w2 = row_w2;
-            for (int x = min_x; x <= max_x; ++x) {
-                if (!((w0 < 0.f || w1 < 0.f || w2 < 0.f) &&
-                      (w0 > 0.f || w1 > 0.f || w2 > 0.f))) {
-                    float nw0 = w0 / area, nw1 = w1 / area, nw2 = w2 / area;
-                    float inv_z = nw0 * vertices[0].inv_z + nw1 * vertices[1].inv_z + nw2 * vertices[2].inv_z;
-                    /* Depth first: a hidden pixel costs neither the two
-                       divides of the sample nor the shade. */
-                    if (fabsf(inv_z) >= KEK_EPSILON &&
-                        kek_3d_depth_test(engine, (uint16_t)x, (uint16_t)y, inv_z)) {
-                        float u_over_z = nw0 * vertices[0].u_over_z + nw1 * vertices[1].u_over_z + nw2 * vertices[2].u_over_z;
-                        float v_over_z = nw0 * vertices[0].v_over_z + nw1 * vertices[1].v_over_z + nw2 * vertices[2].v_over_z;
-                        uint8_t texel = kek_texture_sample(engine, texture, u_over_z / inv_z, v_over_z / inv_z);
-                        int shade = shade_uniform ? shade_fixed : kek_3d_shade_fixed(
-                            nw0 * vertices[0].shade + nw1 * vertices[1].shade + nw2 * vertices[2].shade);
-                        kek_blit(engine, (uint16_t)x, (uint16_t)y, kek_3d_shade_row(engine, shade, x, y)[texel]);
-                    }
+        /* Where the row is covered, found with the edge functions alone —
+           the same additions the drawing pass repeats, so both agree on
+           every pixel. A triangle covers one stretch of a row, but the
+           drawing pass tests each pixel again rather than rely on it. */
+        for (int x = s.min_x; x <= s.max_x; ++x) {
+            if (kek_3d_covered(w0, w1, w2)) {
+                if (first < 0) {
+                    first = x;
+                    first_w0 = w0; first_w1 = w1; first_w2 = w2;
                 }
-                w0 += step_w0_x; w1 += step_w1_x; w2 += step_w2_x;
+                last = x;
             }
-            row_w0 += step_w0_y; row_w1 += step_w1_y; row_w2 += step_w2_y;
+            w0 += s.step_x[0]; w1 += s.step_x[1]; w2 += s.step_x[2];
         }
+        if (first >= 0) {
+            kek_3d_textured_row(engine, texture, &s, &p, y, first, last, first_w0, first_w1, first_w2);
+        }
+        row_w0 += s.step_y[0]; row_w1 += s.step_y[1]; row_w2 += s.step_y[2];
     }
 }
 

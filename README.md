@@ -8,7 +8,7 @@ KEK is a 2D/3D software renderer/engine written in pure C99 with no dynamic allo
 ## Structure
 Right now, it has 4 components:
 - `kek/` — the engine itself: rasterization (2D and 3D), math, pool allocator, model/image/palette/font handling
-- `game/` — game/business logic
+- `demo/` — a demo scene and its assets: what the engine can do, and a consumer of it the way a game would be. The game itself lives in a separate repository
 - `platform/` — platform implementation files (SDL3 for now; builds on Windows, Linux and, through Emscripten, the browser)
 - `tools/kek_editor/` — an editor built on Dear ImGui (C++20) that links against the engine. The shell and the tool-plugin architecture work; the scene and model tools are still stubs.
 
@@ -29,7 +29,7 @@ cmake -B build
 cmake --build build
 ```
 
-Targets: `kek` (engine), `SnusShooter` (game logic), `kek_editor` (editor), and `SnusShooter_sdl` (the playable executable).
+Targets: `kek` (engine), `kek_demo` (the demo scene), `kek_editor` (editor), and `kek_demo_sdl` (the runnable demo).
 
 `-Wall -Wextra -Wpedantic` (`/W4` on MSVC) are on for everything but the vendored Dear ImGui. `-DKEK_WERROR=ON` turns them into errors; `.github/workflows/native.yml` builds that way on Linux GCC, Linux Clang and Windows MSVC, and runs `clang-tidy` as a separate job, pinned to one LLVM release, where any finding fails the build.
 
@@ -39,10 +39,10 @@ The engine's unit tests live in `tests/`, on [Unity](https://github.com/ThrowThe
 ctest --test-dir build --output-on-failure
 ```
 
-The game resolves assets against the working directory, so run it from its output directory:
+The demo resolves assets against the working directory, so run it from its output directory:
 
 ```sh
-cd build/Debug && ./SnusShooter_sdl
+cd build/Debug && ./kek_demo_sdl
 ```
 
 ### Browser build

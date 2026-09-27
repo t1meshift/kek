@@ -1,9 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-# Project settings
-set(GAME_NAME "SnusShooter")
-
-project(${GAME_NAME} VERSION 0.1.0 LANGUAGES C CXX)
+project(kek VERSION 0.1.0 LANGUAGES C CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Dependencies are resolved by CMake so a fresh clone builds without setup:
@@ -137,7 +134,7 @@ set(
 enable_testing()
 
 ######## Warnings ########
-# Applied to the engine, the game, the platform layer and the editor — but not
+# Applied to the engine, the demo, the platform layer and the editor — but not
 # to the vendored Dear ImGui, whose warnings are not ours to fix. PRIVATE so the
 # flags do not leak into anything linking against kek.
 #
@@ -224,47 +221,49 @@ if(UNIX)
 endif()
 
 
-######## The game ########
-add_library(${GAME_NAME}
-  game/include/game_scenes/game_scene_entry.h
-  game/include/game_scene_loader.h
-  game/include/game_tag.h
-  game/include/game.h
-  game/game_scene_entry.c
-  game/game_scene_loader.c
-  game/game.c
+######## The demo ########
+# What the engine can do, in one scene. It is a consumer of the engine like any
+# game would be; the game itself lives in its own repository.
+add_library(kek_demo
+  demo/include/demo_scenes/demo_scene_entry.h
+  demo/include/demo_scene_loader.h
+  demo/include/demo_tag.h
+  demo/include/demo.h
+  demo/demo_scene_entry.c
+  demo/demo_scene_loader.c
+  demo/demo.c
 )
-set_target_properties(${GAME_NAME} PROPERTIES 
+set_target_properties(kek_demo PROPERTIES 
   C_STANDARD 99
   C_STANDARD_REQUIRED ON
   C_EXTENSIONS OFF
 )
-kek_target_warnings(${GAME_NAME})
-target_include_directories(${GAME_NAME} PUBLIC
-  game/include/
+kek_target_warnings(kek_demo)
+target_include_directories(kek_demo PUBLIC
+  demo/include/
 )
-target_link_libraries(${GAME_NAME} PRIVATE kek)
+target_link_libraries(kek_demo PRIVATE kek)
 
 
 ######## Platform implementations ########
 # SDL3 executable — platform-agnostic, the only platform layer implemented so far.
-add_executable(${GAME_NAME}_sdl
+add_executable(kek_demo_sdl
   platform/main_sdl.c
   platform/platform_assets_fs.h
   platform/platform_assets_fs.c
 )
-set_target_properties(${GAME_NAME}_sdl PROPERTIES
+set_target_properties(kek_demo_sdl PROPERTIES
   C_STANDARD 11 # Required by SDL3
   C_STANDARD_REQUIRED ON
   C_EXTENSIONS OFF
 )
-kek_target_warnings(${GAME_NAME}_sdl)
-target_link_libraries(${GAME_NAME}_sdl PRIVATE kek ${GAME_NAME} SDL3::SDL3)
+kek_target_warnings(kek_demo_sdl)
+target_link_libraries(kek_demo_sdl PRIVATE kek kek_demo SDL3::SDL3)
 
 if(WIN32)
   add_custom_command(
-    TARGET ${GAME_NAME}_sdl POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:SDL3::SDL3>" "$<TARGET_FILE_DIR:${GAME_NAME}_sdl>"
+    TARGET kek_demo_sdl POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:SDL3::SDL3>" "$<TARGET_FILE_DIR:kek_demo_sdl>"
     VERBATIM
   )
 endif()
@@ -275,15 +274,15 @@ if(EMSCRIPTEN)
   # platform_assets_fs.c keeps working unchanged — MEMFS mounts the embedded
   # files at /assets and the working directory is /, so "./assets/" resolves.
   set(KEK_WEB_SHELL "${CMAKE_SOURCE_DIR}/platform/web/shell.html")
-  file(GLOB_RECURSE KEK_WEB_ASSET_FILES "${CMAKE_SOURCE_DIR}/assets/*")
+  file(GLOB_RECURSE KEK_WEB_ASSET_FILES "${CMAKE_SOURCE_DIR}/demo/assets/*")
 
-  set_target_properties(${GAME_NAME}_sdl PROPERTIES
+  set_target_properties(kek_demo_sdl PROPERTIES
     OUTPUT_NAME "index"
     SUFFIX ".html"
     LINK_DEPENDS "${KEK_WEB_SHELL};${KEK_WEB_ASSET_FILES}"
   )
-  target_link_options(${GAME_NAME}_sdl PRIVATE
-    "--embed-file" "${CMAKE_SOURCE_DIR}/assets@/assets"
+  target_link_options(kek_demo_sdl PRIVATE
+    "--embed-file" "${CMAKE_SOURCE_DIR}/demo/assets@/assets"
     "--shell-file" "${KEK_WEB_SHELL}"
     # The 1 MB -sSTACK_SIZE that used to be here was for kek_file_model_load(),
     # which staged a whole KMF in ~51 KB of locals. That is a static scratch
@@ -296,16 +295,16 @@ if(EMSCRIPTEN)
     "-sEXIT_RUNTIME=0"
   )
 else()
-  # The game resolves assets against the working directory (see "./assets/" in
+  # The demo resolves assets against the working directory (see "./assets/" in
   # platform/main_sdl.c), so they have to sit next to the executable.
   add_custom_command(
-    TARGET ${GAME_NAME}_sdl POST_BUILD
+    TARGET kek_demo_sdl POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E remove_directory
-            "$<TARGET_FILE_DIR:${GAME_NAME}_sdl>/assets"
+            "$<TARGET_FILE_DIR:kek_demo_sdl>/assets"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_SOURCE_DIR}/assets"
-            "$<TARGET_FILE_DIR:${GAME_NAME}_sdl>/assets"
-    COMMENT "Replacing assets directory next to ${GAME_NAME}_sdl"
+            "${CMAKE_SOURCE_DIR}/demo/assets"
+            "$<TARGET_FILE_DIR:kek_demo_sdl>/assets"
+    COMMENT "Replacing assets directory next to kek_demo_sdl"
   )
 endif()
 

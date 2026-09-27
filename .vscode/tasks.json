@@ -6,7 +6,7 @@
 			"label": "CMake: clean rebuild",
 			"command": "cleanRebuild",
 			"targets": [
-				"SnusShooter_sdl"
+				"kek_demo_sdl"
 			],
 			"group": "build",
 			"problemMatcher": [],

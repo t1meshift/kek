@@ -30,7 +30,7 @@ Checks: >
 #   rasterizer.
 # bugprone-assignment-in-if-condition, bugprone-switch-missing-default-case —
 #   style calls, not defects.
-# cert-int09-c — wants all-or-nothing explicit enum values; GAME_SceneTag is
+# cert-int09-c — wants all-or-nothing explicit enum values; DEMO_SceneTag is
 #   deliberately "first one pinned, rest sequential".
 # clang-analyzer-security.insecureAPI...  — wants memcpy_s/memset_s. Annex K is
 #   optional, glibc does not have it, and neither will DJGPP.
@@ -45,7 +45,7 @@ Checks: >
 # stream, snprintf into a debug overlay — say so with a (void) cast; see
 # AllowCastToVoid below.
 
-HeaderFilterRegex: '.*/(kek|game|platform)/.*\.h$'
+HeaderFilterRegex: '.*/(kek|demo|platform)/.*\.h$'
 # The filter matches on the absolute path, and a checkout of a repository
 # named kek is itself a /kek/ directory — on the CI runner every header under
 # build/_deps (SDL3, Unity) matched it. Fetched dependencies are never ours.

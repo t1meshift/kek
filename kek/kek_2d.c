@@ -338,7 +338,7 @@ static void kek_2d_point(KEK_engine* engine, int x, int y, uint8_t color) {
 }
 
 /* Half-open in y and closed in x. Lopsided, but it is the existing convention:
-   the debug bars in the game tile as {0, i*8} to {8, (i+1)*8} and rely on the
+   the debug bars in the demo tile as {0, i*8} to {8, (i+1)*8} and rely on the
    bottom row being exclusive. */
 void kek_2d_rect(KEK_engine* engine, KEK_IVec2 p0, KEK_IVec2 p1, uint8_t color_fill) {
     int y0 = p0.y;

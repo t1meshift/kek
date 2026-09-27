@@ -12,7 +12,7 @@ after every frame and Emscripten drives it from requestAnimationFrame.
 #include <stdint.h>
 #include "platform_assets_fs.h"
 #include <kek.h>
-#include <game.h>
+#include <demo.h>
 
 #define APP_WINDOW_WIDTH 1280
 #define APP_WINDOW_HEIGHT 800
@@ -88,7 +88,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     app->engine = kek_init();
     fs_asset_provider_init(&app->assets, "./assets/");
     app->engine.assets = &app->assets.base;
-    kek_set_scene(&app->engine, GAME_init_ctx());
+    kek_set_scene(&app->engine, DEMO_init_ctx());
     app_build_palette(app);
 
     if (!SDL_CreateWindowAndRenderer("kek", APP_WINDOW_WIDTH, APP_WINDOW_HEIGHT, window_flags,

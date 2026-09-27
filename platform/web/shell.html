@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>KEK — SnusShooter</title>
+<title>KEK — demo</title>
 <style>
   html, body {
     margin: 0;
@@ -66,7 +66,7 @@
   Module.setStatus('Loading…');
   window.onerror = function () { Module.setStatus('Something broke — see the console.'); };
 
-  // Keep the page from scrolling out from under the game.
+  // Keep the page from scrolling out from under the demo.
   canvasElement.addEventListener('keydown', function (e) {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].indexOf(e.key) !== -1) {
       e.preventDefault();

@@ -1,6 +1,6 @@
 name: Native
 
-# Builds the engine, the game, the SDL3 platform layer and the editor on the
+# Builds the engine, the demo, the SDL3 platform layer and the editor on the
 # toolchains people actually use, and runs the engine's unit tests. web-demo.yml
 # covers Emscripten and is deliberately separate — it publishes, this one only
 # checks.
@@ -143,7 +143,7 @@ jobs:
         run: |
           status=0
           run-clang-tidy-${CLANG_TIDY_VERSION} -p build -quiet \
-            '^${{ github.workspace }}/(kek|game|platform|tools|tests)/' \
+            '^${{ github.workspace }}/(kek|demo|platform|tools|tests)/' \
             > tidy.log 2>&1 || status=$?
           cat tidy.log
           echo "### clang-tidy ${CLANG_TIDY_VERSION}: $(grep -cE ': (warning|error): ' tidy.log) findings" >> "$GITHUB_STEP_SUMMARY"

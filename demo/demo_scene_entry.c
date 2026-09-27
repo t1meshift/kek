@@ -3,30 +3,30 @@
 #include <kek_2d.h>
 #include <kek_3d.h>
 #include <kek_model.h>
-#include "game_tag.h"
+#include "demo_tag.h"
 #include "kek.h"
 #include "kek_file_image.h"
 #include "kek_file_model.h"
 #include "kek_keyboard.h"
 #include "kek_math.h"
 #include "kek_texture.h"
-#include "game_scenes/game_scene_entry.h"
+#include "demo_scenes/demo_scene_entry.h"
 
 /* +1, -1 or 0 when both or neither are held, as one input axis. */
 static float key_axis(const KEK_engine* e, KEK_scancode positive, KEK_scancode negative) {
     return (float)kek_key_held(e, positive) - (float)kek_key_held(e, negative);
 }
 
-static void GAME_EntryScene_reset_(GAME_EntryScene* s) {
+static void DEMO_EntryScene_reset_(DEMO_EntryScene* s) {
     s->base = (KEK_scene){
-        .enter = &GAME_EntryScene_enter,
-        .exit = &GAME_EntryScene_exit,
-        .update = &GAME_EntryScene_update,
-        .render = &GAME_EntryScene_render,
+        .enter = &DEMO_EntryScene_enter,
+        .exit = &DEMO_EntryScene_exit,
+        .update = &DEMO_EntryScene_update,
+        .render = &DEMO_EntryScene_render,
         /* No event handlers: update polls the engine's keyboard state. */
         .key_up = 0,
         .key_down = 0,
-        .tag = GAME_TAG_SCENE_ENTRY
+        .tag = DEMO_TAG_SCENE_ENTRY
     };
     s->camera = KEK_DEFAULT_CAMERA;
     s->elapsed = 0.f;
@@ -34,13 +34,13 @@ static void GAME_EntryScene_reset_(GAME_EntryScene* s) {
     s->texture = KEK_TEXTURE_HANDLE_INVALID;
 }
 
-GAME_EntryScene GAME_EntryScene_init(void) {
-    GAME_EntryScene result;
-    GAME_EntryScene_reset_(&result);
+DEMO_EntryScene DEMO_EntryScene_init(void) {
+    DEMO_EntryScene result;
+    DEMO_EntryScene_reset_(&result);
     return result;
 }
 
-void GAME_EntryScene_load_assets_(GAME_EntryScene* s, KEK_engine* e) {
+void DEMO_EntryScene_load_assets_(DEMO_EntryScene* s, KEK_engine* e) {
     KEK_model* mdl;
 
     if (!e) {
@@ -71,18 +71,18 @@ void GAME_EntryScene_load_assets_(GAME_EntryScene* s, KEK_engine* e) {
     }
 } 
 
-void GAME_EntryScene_enter(KEK_scene* scene, KEK_engine* e) {
-    GAME_EntryScene* s = (GAME_EntryScene*)scene;
-    GAME_EntryScene_reset_(s);
+void DEMO_EntryScene_enter(KEK_scene* scene, KEK_engine* e) {
+    DEMO_EntryScene* s = (DEMO_EntryScene*)scene;
+    DEMO_EntryScene_reset_(s);
     kek_texture_set_warp_mode(e, KEK_TEXTURE_WARP_CLAMP);
     /* The cat sits 4.5 away; fog starts past it, so backing off shows it. */
     kek_3d_set_fog(e, 6.f, 25.f);
 
-    GAME_EntryScene_load_assets_(s, e);
+    DEMO_EntryScene_load_assets_(s, e);
 }
 
-void GAME_EntryScene_exit(KEK_scene* scene, KEK_engine* e) {
-    GAME_EntryScene* s = (GAME_EntryScene*)scene;
+void DEMO_EntryScene_exit(KEK_scene* scene, KEK_engine* e) {
+    DEMO_EntryScene* s = (DEMO_EntryScene*)scene;
     if (s->model != KEK_MODEL_HANDLE_INVALID) {
         kek_model_destroy(e, s->model);
     }
@@ -93,8 +93,8 @@ void GAME_EntryScene_exit(KEK_scene* scene, KEK_engine* e) {
     s->texture = KEK_TEXTURE_HANDLE_INVALID;
 }
 
-void GAME_EntryScene_update(KEK_scene* scene, KEK_engine* e, float dt) {
-    GAME_EntryScene* s = (GAME_EntryScene*)scene;
+void DEMO_EntryScene_update(KEK_scene* scene, KEK_engine* e, float dt) {
+    DEMO_EntryScene* s = (DEMO_EntryScene*)scene;
     KEK_FVec3 move_vec = {0, 0, 0};
     KEK_FVec3 rotate_vec = {0, 0, 0};
     float move_right;
@@ -140,8 +140,8 @@ void GAME_EntryScene_update(KEK_scene* scene, KEK_engine* e, float dt) {
     s->elapsed += dt_s;
 }
 
-void GAME_EntryScene_render(KEK_scene* scene, KEK_engine* e) {
-    GAME_EntryScene* s = (GAME_EntryScene*)scene;
+void DEMO_EntryScene_render(KEK_scene* scene, KEK_engine* e) {
+    DEMO_EntryScene* s = (DEMO_EntryScene*)scene;
     KEK_model* mdl = kek_model_get(e, s->model);
 
     for (int i = 0; i < 16; ++i) {

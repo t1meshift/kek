@@ -12,7 +12,6 @@ typedef struct GAME_EntryScene {
     KEK_camera camera;
     KEK_ModelHandle model;
     KEK_TextureHandle texture;
-    uint16_t movement;
     float elapsed; /* seconds since the scene was entered */
 } GAME_EntryScene;
 
@@ -22,7 +21,5 @@ void GAME_EntryScene_enter(KEK_scene* scene, KEK_engine* e);
 void GAME_EntryScene_exit(KEK_scene* scene, KEK_engine* e);
 void GAME_EntryScene_update(KEK_scene* scene, KEK_engine* e, float dt);
 void GAME_EntryScene_render(KEK_scene* scene, KEK_engine* e);
-void GAME_EntryScene_key_up(KEK_scene* scene, KEK_engine* e, KEK_scancode key);
-void GAME_EntryScene_key_down(KEK_scene* scene, KEK_engine* e, KEK_scancode key);
 
 #endif //  GAME_SCENES_GAME_SCENE_ENTRY_H

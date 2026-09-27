@@ -12,22 +12,10 @@
 #include "kek_texture.h"
 #include "game_scenes/game_scene_entry.h"
 
-typedef enum _GAME_EntryScene_Movement {
-    MOVE_NONE    = 0,
-    MOVE_UP      = 1 << 0,
-    MOVE_DOWN    = 1 << 1,
-    MOVE_FORWARD = 1 << 2,
-    MOVE_BACK    = 1 << 3,
-    MOVE_LEFT    = 1 << 4,
-    MOVE_RIGHT   = 1 << 5,
-    ROTATE_UP    = 1 << 6,
-    ROTATE_DOWN  = 1 << 7,
-    ROTATE_LEFT  = 1 << 8,
-    ROTATE_RIGHT = 1 << 9
-} _GAME_EntryScene_Movement;
-
-#define SET_MOVE(m, dir) do { (m) |= (dir); } while(0)
-#define UNSET_MOVE(m, dir) do { (m) &= ~(dir); } while(0)
+/* +1, -1 or 0 when both or neither are held, as one input axis. */
+static float key_axis(const KEK_engine* e, KEK_scancode positive, KEK_scancode negative) {
+    return (float)kek_key_held(e, positive) - (float)kek_key_held(e, negative);
+}
 
 static void _GAME_EntryScene_reset(GAME_EntryScene* s) {
     s->base = (KEK_scene){
@@ -35,13 +23,13 @@ static void _GAME_EntryScene_reset(GAME_EntryScene* s) {
         .exit = &GAME_EntryScene_exit,
         .update = &GAME_EntryScene_update,
         .render = &GAME_EntryScene_render,
-        .key_up = &GAME_EntryScene_key_up,
-        .key_down = &GAME_EntryScene_key_down,
+        /* No event handlers: update polls the engine's keyboard state. */
+        .key_up = 0,
+        .key_down = 0,
         .tag = GAME_TAG_SCENE_ENTRY
     };
     s->camera = KEK_DEFAULT_CAMERA;
     s->elapsed = 0.f;
-    s->movement = MOVE_NONE;
     s->model = KEK_MODEL_HANDLE_INVALID;
     s->texture = KEK_TEXTURE_HANDLE_INVALID;
 }
@@ -107,7 +95,6 @@ void GAME_EntryScene_update(KEK_scene* scene, KEK_engine* e, float dt) {
     GAME_EntryScene* s = (GAME_EntryScene*)scene;
     KEK_FVec3 move_vec = {0, 0, 0};
     KEK_FVec3 rotate_vec = {0, 0, 0};
-    uint16_t m = s->movement;
     float move_right;
     float move_up;
     float move_forward;
@@ -115,15 +102,13 @@ void GAME_EntryScene_update(KEK_scene* scene, KEK_engine* e, float dt) {
     KEK_FVec3 forward;
     KEK_FVec3 right;
 
-    (void)e; /* part of the scene callback signature, not a use */
-
     const float move_speed = 1.f;
     const float rotate_speed = 3.1415f / 4.f;
     const float dt_s = dt / 1000.f; /* dt arrives in milliseconds */
 
-    move_right = 1.f * ((m & MOVE_RIGHT) != 0) + -1.f * ((m & MOVE_LEFT) != 0);
-    move_up = 1.f * ((m & MOVE_UP) != 0) + -1.f * ((m & MOVE_DOWN) != 0);
-    move_forward = 1.f * ((m & MOVE_FORWARD) != 0) + -1.f * ((m & MOVE_BACK) != 0);
+    move_right = key_axis(e, KEK_SCANCODE_D, KEK_SCANCODE_A);
+    move_up = key_axis(e, KEK_SCANCODE_SPACE, KEK_SCANCODE_LSHIFT);
+    move_forward = key_axis(e, KEK_SCANCODE_W, KEK_SCANCODE_S);
     yaw = s->camera.rotation.y;
 
     forward = (KEK_FVec3) {
@@ -144,8 +129,8 @@ void GAME_EntryScene_update(KEK_scene* scene, KEK_engine* e, float dt) {
     kek_mul_fvec3_n(&move_vec, move_speed * dt_s);
     kek_add_fvec3(&s->camera.position, &move_vec);
 
-    rotate_vec.x = 1.f * ((m & ROTATE_UP) != 0) + -1.f * ((m & ROTATE_DOWN) != 0);
-    rotate_vec.y = 1.f * ((m & ROTATE_LEFT) != 0) + -1.f * ((m & ROTATE_RIGHT) != 0);
+    rotate_vec.x = key_axis(e, KEK_SCANCODE_UP, KEK_SCANCODE_DOWN);
+    rotate_vec.y = key_axis(e, KEK_SCANCODE_LEFT, KEK_SCANCODE_RIGHT);
     kek_normalize_fvec3(&rotate_vec);
     kek_mul_fvec3_n(&rotate_vec, rotate_speed * dt_s);
     kek_add_fvec3(&s->camera.rotation, &rotate_vec);
@@ -202,76 +187,3 @@ void GAME_EntryScene_render(KEK_scene* scene, KEK_engine* e) {
     );
     kek_2d_text_5x8(e, &KEK_FONT_DEFAULT_5X8, (KEK_IVec2) { 30, 8 }, buf, 9);
 }
-
-void GAME_EntryScene_key_up(KEK_scene* scene, KEK_engine* e, KEK_scancode key) {
-    GAME_EntryScene* s = (GAME_EntryScene*)scene;
-    (void)e;
-
-    if (key == KEK_SCANCODE_W) {
-        UNSET_MOVE(s->movement, MOVE_FORWARD);
-    }
-    if (key == KEK_SCANCODE_S) {
-        UNSET_MOVE(s->movement, MOVE_BACK);
-    }
-    if (key == KEK_SCANCODE_A) {
-        UNSET_MOVE(s->movement, MOVE_LEFT);
-    }
-    if (key == KEK_SCANCODE_D) {
-        UNSET_MOVE(s->movement, MOVE_RIGHT);
-    }
-    if (key == KEK_SCANCODE_SPACE) {
-        UNSET_MOVE(s->movement, MOVE_UP);
-    }
-    if (key == KEK_SCANCODE_LSHIFT) {
-        UNSET_MOVE(s->movement, MOVE_DOWN);
-    }
-    if (key == KEK_SCANCODE_LEFT) {
-        UNSET_MOVE(s->movement, ROTATE_LEFT);
-    }
-    if (key == KEK_SCANCODE_RIGHT) {
-        UNSET_MOVE(s->movement, ROTATE_RIGHT);
-    }
-    if (key == KEK_SCANCODE_UP) {
-        UNSET_MOVE(s->movement, ROTATE_UP);
-    }
-    if (key == KEK_SCANCODE_DOWN) {
-        UNSET_MOVE(s->movement, ROTATE_DOWN);
-    }
-}
-
-void GAME_EntryScene_key_down(KEK_scene* scene, KEK_engine* e, KEK_scancode key) {
-    GAME_EntryScene* s = (GAME_EntryScene*)scene;
-    (void)e;
-
-    if (key == KEK_SCANCODE_W) {
-        SET_MOVE(s->movement, MOVE_FORWARD);
-    }
-    if (key == KEK_SCANCODE_S) {
-        SET_MOVE(s->movement, MOVE_BACK);
-    }
-    if (key == KEK_SCANCODE_A) {
-        SET_MOVE(s->movement, MOVE_LEFT);
-    }
-    if (key == KEK_SCANCODE_D) {
-        SET_MOVE(s->movement, MOVE_RIGHT);
-    }
-    if (key == KEK_SCANCODE_SPACE) {
-        SET_MOVE(s->movement, MOVE_UP);
-    }
-    if (key == KEK_SCANCODE_LSHIFT) {
-        SET_MOVE(s->movement, MOVE_DOWN);
-    }
-    if (key == KEK_SCANCODE_LEFT) {
-        SET_MOVE(s->movement, ROTATE_LEFT);
-    }
-    if (key == KEK_SCANCODE_RIGHT) {
-        SET_MOVE(s->movement, ROTATE_RIGHT);
-    }
-    if (key == KEK_SCANCODE_UP) {
-        SET_MOVE(s->movement, ROTATE_UP);
-    }
-    if (key == KEK_SCANCODE_DOWN) {
-        SET_MOVE(s->movement, ROTATE_DOWN);
-    }
-}
-

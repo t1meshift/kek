@@ -4,6 +4,7 @@
 # Build output
 /build
 /build-web
+/build-dos
 /out
 compile_commands.json
 

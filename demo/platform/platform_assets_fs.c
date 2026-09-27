@@ -1,9 +1,9 @@
 #include "platform_assets_fs.h"
 
-#include <assert.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include <kek_macro.h>
 
 #define FS_ASSET_PATH_CAPACITY 260
 
@@ -12,8 +12,11 @@ typedef struct FS_AssetStreamState {
     size_t size;
 } FS_AssetStreamState;
 
-static_assert(sizeof(FS_AssetStreamState) <= sizeof(((KEK_AssetStream*)0)->impl), "");
-static_assert(offsetof(FS_AssetProvider, base) == 0, "");
+/* KEK_STATIC_ASSERT_DECL rather than C11's static_assert: this file is built
+   under plain C99 for the DOS target, whose DJGPP headers predate C11's
+   assert.h additions. */
+KEK_STATIC_ASSERT_DECL(fs_asset_stream_state_fits, sizeof(FS_AssetStreamState) <= sizeof(((KEK_AssetStream*)0)->impl));
+KEK_STATIC_ASSERT_DECL(fs_asset_provider_base_first, offsetof(FS_AssetProvider, base) == 0);
 
 static size_t fs_asset_read_(KEK_AssetStream* stream, void* dst, size_t size);
 static int fs_asset_seek_(KEK_AssetStream* stream, size_t offset);

@@ -15,6 +15,9 @@ if(NOT TARGET kek::kek)
   find_package(kek REQUIRED)
 endif()
 
+# DJGPP has no use for SDL3 — the DOS platform layer talks to VGA and IRQ9
+# directly (platform/dos/) — and no cross-built SDL3 exists to find or fetch.
+if(NOT DJGPP)
 option(KEK_FETCH_DEPS "Resolve dependencies automatically (system package or FetchContent)" ON)
 set(KEK_SDL3_LOCAL_DIR "${CMAKE_SOURCE_DIR}/ext/SDL3-3.4.2"
     CACHE PATH "Prebuilt SDL3 used when KEK_FETCH_DEPS=OFF")
@@ -56,6 +59,7 @@ if(NOT TARGET SDL3::SDL3)
     find_package(SDL3 REQUIRED)
   endif()
 endif()
+endif()
 
 # The same set kek builds with, for the same reasons; see the top-level
 # CMakeLists.txt. A copy rather than a shared file, so this directory stands
@@ -94,6 +98,7 @@ target_include_directories(kek_demo PUBLIC
 )
 target_link_libraries(kek_demo PRIVATE kek::kek)
 
+if(NOT DJGPP)
 ######## SDL3 platform layer ########
 # Platform-agnostic as far as SDL3 goes: Windows, Linux and, through
 # Emscripten, the browser.
@@ -156,4 +161,41 @@ else()
             "$<TARGET_FILE_DIR:kek_demo_sdl>/assets"
     COMMENT "Replacing assets directory next to kek_demo_sdl"
   )
+endif()
+
+else() # DJGPP
+######## DOS platform layer ########
+# VGA mode 13h and an IRQ9 keyboard handler, straight to the hardware — see
+# platform/dos/main_dos.c. No SDL3, no dynamic loading of anything.
+add_executable(kek_demo_dos
+  platform/platform_assets_fs.h
+  platform/platform_assets_fs.c
+  platform/dos/platform_dos_keyboard.h
+  platform/dos/platform_dos_keyboard.c
+  platform/dos/main_dos.c
+)
+set_target_properties(kek_demo_dos PROPERTIES
+  C_STANDARD 99
+  C_STANDARD_REQUIRED ON
+  # DJGPP's <dpmi.h>/<go32.h> hide the _go32_dpmi_* declarations this file
+  # needs behind "#ifndef __STRICT_ANSI__", which plain -std=c99 sets; only
+  # the GNU dialect (-std=gnu99) leaves it unset. kek itself needs no such
+  # thing and stays strict.
+  C_EXTENSIONS ON
+)
+kek_demo_warnings(kek_demo_dos)
+target_link_libraries(kek_demo_dos PRIVATE kek::kek kek_demo)
+
+# The demo resolves assets against the working directory (see "./assets/" in
+# main_dos.c), so they have to sit next to the executable — the same rule as
+# kek_demo_sdl, just without Emscripten's embedded-file alternative.
+add_custom_command(
+  TARGET kek_demo_dos POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E remove_directory
+          "$<TARGET_FILE_DIR:kek_demo_dos>/assets"
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+          "$<TARGET_FILE_DIR:kek_demo_dos>/assets"
+  COMMENT "Replacing assets directory next to kek_demo_dos"
+)
 endif()

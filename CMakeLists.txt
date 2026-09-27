@@ -165,9 +165,9 @@ target_compile_definitions(kek PUBLIC
   KEK_TARGET_FPS=${KEK_TARGET_FPS}u
   KEK_PALETTE_SHADING_LEVELS=${KEK_PALETTE_SHADING_LEVELS}
 )
-if(UNIX)
+if(UNIX OR DJGPP)
   # sqrtf/sinf/cosf/tanf/floorf/roundf/fabsf. Recent glibc folds libm into libc,
-  # but older ones and musl still need the explicit link.
+  # but older ones, musl and DJGPP's fdlibm still need the explicit link.
   target_link_libraries(kek PUBLIC m)
 endif()
 

@@ -9,6 +9,7 @@ extern "C" {
 #include "kek_asset.h"
 #include "kek_palette.h"
 #include "kek_keyboard.h"
+#include "kek_light.h"
 #include "kek_pool.h"
 
 typedef struct KEK_scene KEK_scene;
@@ -43,6 +44,7 @@ struct KEK_engine {
     KEK_ModelHandle default_cube_model;
     KEK_TextureHandle default_texture;
     KEK_TextureWarpMode texture_warp_mode;
+    KEK_light light;
     KEK_KeyboardState keyboard;
 };
 

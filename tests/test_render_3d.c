@@ -35,6 +35,7 @@ static KEK_3D_ProjectedVertex vertex(int x, int y, float depth) {
        pipeline, so a textured triangle samples well outside [0, 1]. */
     v.u_over_z = ((float)x / 64.f) * v.inv_z;
     v.v_over_z = ((float)y / 64.f) * v.inv_z;
+    v.shade = 0.f;
     return v;
 }
 
@@ -280,6 +281,192 @@ void test_a_huge_wall_across_the_near_plane_is_culled_by_its_winding_alone(void)
     kek_test_frame_assert_guards();
 }
 
+/* ---- Lighting ----
+
+   No reference pictures here either. What float cannot move: a face square
+   to the light is the colour itself, a face turned away with no ambient is
+   the darkest row and nothing else, ambient 1 is no lighting at all, and a
+   shade between two rows is exactly those two rows in the proportion the
+   dither promises. */
+
+#define LEVELS KEK_PALETTE_SHADING_LEVELS
+#define WHITE 15
+
+static uint8_t shaded(int level, uint8_t color) {
+    return e.shading_palette[256 * level + color];
+}
+
+static KEK_3D_ProjectedVertex vertex_shaded(int x, int y, float depth, float shade) {
+    KEK_3D_ProjectedVertex v = vertex(x, y, depth);
+    v.shade = shade;
+    return v;
+}
+
+/* A 2x2 panel drawn through kek_3d_draw_model in the model's default colour.
+   Corners in order around the panel; the faces wind them so that
+   cross(b - a, c - a) points the way the panel faces. */
+static void draw_panel(const KEK_FVec3 corners[4], const KEK_camera* camera) {
+    static KEK_FVec3 verts[4];
+    static const KEK_model_face faces[2] = { { 0, 2, 1 }, { 0, 3, 2 } };
+    KEK_camera cam = *camera;
+    KEK_model panel;
+    KEK_FVec3 zero = { 0.f, 0.f, 0.f };
+    size_t i;
+
+    for (i = 0; i < 4; ++i) {
+        verts[i] = corners[i];
+    }
+    memset(&panel, 0, sizeof(panel));
+    panel.verts = verts;
+    panel.faces = (KEK_model_face*)faces;
+    panel.verts_count = 4;
+    panel.faces_count = 2;
+    panel.texture = KEK_TEXTURE_HANDLE_INVALID;
+    kek_3d_draw_model(&e, &panel, &cam, zero, zero);
+}
+
+/* Square to the default camera at depth z, facing it: its normal is -z. */
+static void draw_panel_facing_camera(float z) {
+    KEK_FVec3 corners[4];
+    corners[0] = (KEK_FVec3){ -1.f, -1.f, z };
+    corners[1] = (KEK_FVec3){  1.f, -1.f, z };
+    corners[2] = (KEK_FVec3){  1.f,  1.f, z };
+    corners[3] = (KEK_FVec3){ -1.f,  1.f, z };
+    draw_panel(corners, &KEK_DEFAULT_CAMERA);
+}
+
+/* Every painted pixel is this colour, and there is at least one. */
+static void assert_painted_all(uint8_t color) {
+    int painted = kek_test_frame_painted(&e);
+    TEST_ASSERT_GREATER_THAN_INT(0, painted);
+    TEST_ASSERT_EQUAL_INT(painted, kek_test_frame_count(&e, color));
+    kek_test_frame_assert_guards();
+}
+
+void test_a_face_square_to_the_light_is_its_own_colour(void) {
+    kek_3d_set_light(&e, (KEK_FVec3){ 0.f, 0.f, 1.f }, 0.f);
+    draw_panel_facing_camera(3.f);
+    assert_painted_all(WHITE);
+}
+
+void test_a_face_turned_from_the_light_with_no_ambient_is_the_darkest_row(void) {
+    kek_3d_set_light(&e, (KEK_FVec3){ 0.f, 0.f, -1.f }, 0.f);
+    draw_panel_facing_camera(3.f);
+    assert_painted_all(shaded(LEVELS - 1, WHITE));
+}
+
+void test_full_ambient_switches_lighting_off(void) {
+    kek_3d_set_light(&e, (KEK_FVec3){ 0.f, 0.f, -1.f }, 1.f);
+    draw_panel_facing_camera(3.f);
+    assert_painted_all(WHITE);
+}
+
+/* Not scaled by the length of the direction it was given. */
+void test_the_light_direction_is_normalised(void) {
+    kek_3d_set_light(&e, (KEK_FVec3){ 0.f, 0.f, 40.f }, 0.f);
+    TEST_ASSERT_EQUAL_FLOAT(1.f, e.light.direction.z);
+    draw_panel_facing_camera(3.f);
+    assert_painted_all(WHITE);
+}
+
+/* The light stays in the world. A panel at x = 3 facing -x, lit square on by
+   a light travelling +x, seen from a camera turned to look at it from several
+   angles: still fully lit every time. A light that turned with the camera
+   would see the panel's normal as -z and leave it dark. */
+void test_turning_the_camera_does_not_move_the_light(void) {
+    const float turns[] = { -0.4f, 0.f, 0.4f };
+    KEK_FVec3 corners[4];
+    size_t i;
+
+    corners[0] = (KEK_FVec3){ 3.f, -1.f, -1.f };
+    corners[1] = (KEK_FVec3){ 3.f,  1.f, -1.f };
+    corners[2] = (KEK_FVec3){ 3.f,  1.f,  1.f };
+    corners[3] = (KEK_FVec3){ 3.f, -1.f,  1.f };
+    kek_3d_set_light(&e, (KEK_FVec3){ 1.f, 0.f, 0.f }, 0.f);
+    for (i = 0; i < sizeof(turns) / sizeof(turns[0]); ++i) {
+        KEK_camera camera = KEK_DEFAULT_CAMERA;
+        camera.rotation.y = -1.5707963f + turns[i];
+        kek_test_frame_clear(&e);
+        draw_panel(corners, &camera);
+        assert_painted_all(WHITE);
+    }
+}
+
+/* Half a level over the whole frame: the next row on exactly half the
+   pixels, since 320x200 is whole 4x4 tiles and a fraction of 8/16 beats 8 of
+   the 16 thresholds. */
+void test_half_a_level_dithers_half_the_pixels_to_the_next_row(void) {
+    int w = e.w, h = e.h;
+
+    flat(vertex_shaded(-10 * w, -10 * h, 3.f, 0.5f),
+         vertex_shaded(10 * w, -10 * h, 3.f, 0.5f),
+         vertex_shaded(w / 2, 10 * h, 3.f, 0.5f), WHITE);
+    TEST_ASSERT_NOT_EQUAL(shaded(0, WHITE), shaded(1, WHITE));
+    TEST_ASSERT_EQUAL_INT(w * h / 2, kek_test_frame_count(&e, shaded(0, WHITE)));
+    TEST_ASSERT_EQUAL_INT(w * h / 2, kek_test_frame_count(&e, shaded(1, WHITE)));
+    kek_test_frame_assert_guards();
+}
+
+/* A shade past the table is the last row, not a read past it. */
+void test_a_shade_past_the_last_level_is_the_last_row(void) {
+    int w = e.w, h = e.h;
+
+    flat(vertex_shaded(-10 * w, -10 * h, 3.f, 1000.f),
+         vertex_shaded(10 * w, -10 * h, 3.f, 1000.f),
+         vertex_shaded(w / 2, 10 * h, 3.f, 1000.f), WHITE);
+    TEST_ASSERT_EQUAL_INT(w * h, kek_test_frame_count(&e, shaded(LEVELS - 1, WHITE)));
+    kek_test_frame_assert_guards();
+}
+
+/* The same textured triangle unshaded and at the darkest level: pixel for
+   pixel, the second is the first looked up in the last row. */
+void test_a_shaded_texture_is_the_unshaded_one_through_the_shading_palette(void) {
+    static uint8_t unshaded[KEK_BUFFER_WIDTH * KEK_BUFFER_HEIGHT];
+    const KEK_texture* texture = kek_texture_get(&e, kek_default_texture_handle(&e));
+    KEK_3D_ProjectedVertex v[3];
+    int x, y, k;
+
+    for (k = 0; k < 2; ++k) {
+        float shade = k ? (float)(LEVELS - 1) : 0.f;
+        kek_test_frame_clear(&e);
+        v[0] = vertex_shaded(10, 10, 3.f, shade);
+        v[1] = vertex_shaded(300, 20, 3.f, shade);
+        v[2] = vertex_shaded(40, 190, 3.f, shade);
+        kek_3d_triangle_textured(&e, v, texture);
+        for (y = 0; y < e.h; ++y) {
+            for (x = 0; x < e.w; ++x) {
+                uint8_t pixel = kek_test_frame_pixel(&e, x, y);
+                if (!k) {
+                    unshaded[y * e.w + x] = pixel;
+                } else if (unshaded[y * e.w + x]) {
+                    TEST_ASSERT_EQUAL_UINT8(shaded(LEVELS - 1, unshaded[y * e.w + x]), pixel);
+                }
+            }
+        }
+    }
+    kek_test_frame_assert_guards();
+}
+
+void test_fog_darkens_what_is_past_its_end_and_spares_what_is_before_its_start(void) {
+    kek_3d_set_light(&e, (KEK_FVec3){ 0.f, 0.f, 1.f }, 1.f);
+
+    kek_3d_set_fog(&e, 1.f, 2.f);
+    draw_panel_facing_camera(5.f);
+    assert_painted_all(shaded(LEVELS - 1, WHITE));
+
+    kek_test_frame_clear(&e);
+    kek_3d_set_fog(&e, 10.f, 20.f);
+    draw_panel_facing_camera(3.f);
+    assert_painted_all(WHITE);
+}
+
+void test_fog_with_its_end_not_past_its_start_is_off(void) {
+    kek_3d_set_light(&e, (KEK_FVec3){ 0.f, 0.f, 1.f }, 1.f);
+    kek_3d_set_fog(&e, 2.f, 2.f);
+    draw_panel_facing_camera(5.f);
+    assert_painted_all(WHITE);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_the_nearer_surface_wins_drawn_last);
@@ -295,5 +482,15 @@ int main(void) {
     RUN_TEST(test_a_cube_behind_the_camera_or_past_the_far_plane_draws_nothing);
     RUN_TEST(test_cubes_through_the_near_plane_and_off_the_edges_stay_in_the_frame);
     RUN_TEST(test_a_huge_wall_across_the_near_plane_is_culled_by_its_winding_alone);
+    RUN_TEST(test_a_face_square_to_the_light_is_its_own_colour);
+    RUN_TEST(test_a_face_turned_from_the_light_with_no_ambient_is_the_darkest_row);
+    RUN_TEST(test_full_ambient_switches_lighting_off);
+    RUN_TEST(test_the_light_direction_is_normalised);
+    RUN_TEST(test_turning_the_camera_does_not_move_the_light);
+    RUN_TEST(test_half_a_level_dithers_half_the_pixels_to_the_next_row);
+    RUN_TEST(test_a_shade_past_the_last_level_is_the_last_row);
+    RUN_TEST(test_a_shaded_texture_is_the_unshaded_one_through_the_shading_palette);
+    RUN_TEST(test_fog_darkens_what_is_past_its_end_and_spares_what_is_before_its_start);
+    RUN_TEST(test_fog_with_its_end_not_past_its_start_is_off);
     return UNITY_END();
 }

@@ -5,6 +5,7 @@
 #include "kek.h"
 #include "kek_palette.h"
 #include "kek_config.h"
+#include "kek_math.h"
 
 static uint8_t KEK_FRAMEBUFFER[KEK_BUFFER_WIDTH * KEK_BUFFER_HEIGHT];
 static float KEK_DEPTHBUFFER[KEK_BUFFER_WIDTH * KEK_BUFFER_HEIGHT];
@@ -28,6 +29,13 @@ KEK_engine kek_init(void) {
     result.default_cube_model = KEK_MODEL_HANDLE_INVALID;
     result.default_texture = KEK_TEXTURE_HANDLE_INVALID;
     result.texture_warp_mode = KEK_TEXTURE_WARP_CLAMP;
+    /* From above, from the left and from behind the default camera, which
+       looks down +z with y up: the faces a viewer sees first are the lit ones,
+       and the top and left read differently from the sides. */
+    result.light.direction = kek_normalize_fvec3_copy((KEK_FVec3){ 1.f, -2.f, 2.f });
+    result.light.ambient = 0.25f;
+    result.light.fog_start = 0.f;
+    result.light.fog_end = 0.f;
     memset(&result.keyboard, 0, sizeof(result.keyboard));
 
     result.palette = KEK_PALETTE;

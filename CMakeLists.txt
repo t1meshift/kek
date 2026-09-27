@@ -164,6 +164,7 @@ set(KEK_ENGINE_SOURCES
   kek/include/kek_asset.h
   kek/include/kek_asset_memory.h
   kek/include/kek_keyboard.h
+  kek/include/kek_light.h
   kek/include/kek_macro.h
   kek/include/kek_math.h
   kek/include/kek_config.h

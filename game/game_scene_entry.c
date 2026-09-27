@@ -75,6 +75,8 @@ void GAME_EntryScene_enter(KEK_scene* scene, KEK_engine* e) {
     GAME_EntryScene* s = (GAME_EntryScene*)scene;
     GAME_EntryScene_reset_(s);
     kek_texture_set_warp_mode(e, KEK_TEXTURE_WARP_CLAMP);
+    /* The cat sits 4.5 away; fog starts past it, so backing off shows it. */
+    kek_3d_set_fog(e, 6.f, 25.f);
 
     GAME_EntryScene_load_assets_(s, e);
 }

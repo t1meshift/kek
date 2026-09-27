@@ -6,6 +6,7 @@
    never valid again after, and the pool is measured by what it will still hand
    out. */
 
+#include <math.h>
 #include <string.h>
 #include "unity.h"
 #include "kek.h"
@@ -68,8 +69,8 @@ void test_the_defaults_cannot_be_destroyed(void) {
 }
 
 void test_live_handles_are_valid_and_distinct(void) {
-    KEK_ModelHandle a = kek_model_create(&e, 0, 0, 0);
-    KEK_ModelHandle b = kek_model_create(&e, 0, 0, 0);
+    KEK_ModelHandle a = kek_model_create(&e, 0, 0, 0, 0);
+    KEK_ModelHandle b = kek_model_create(&e, 0, 0, 0, 0);
     KEK_TextureHandle ta = kek_texture_create(&e, 1, 1);
     KEK_TextureHandle tb = kek_texture_create(&e, 1, 1);
 
@@ -88,13 +89,16 @@ void test_live_handles_are_valid_and_distinct(void) {
 }
 
 void test_a_new_model_is_empty(void) {
-    KEK_model* mdl = kek_model_get(&e, kek_model_create(&e, 0, 0, 0));
+    KEK_model* mdl = kek_model_get(&e, kek_model_create(&e, 0, 0, 0, 0));
 
     TEST_ASSERT_NOT_NULL(mdl);
     TEST_ASSERT_EQUAL_UINT32(0, mdl->verts_count);
     TEST_ASSERT_EQUAL_UINT32(0, mdl->faces_count);
     TEST_ASSERT_EQUAL_UINT32(0, mdl->colors_count);
-    TEST_ASSERT_EQUAL_UINT32(0, mdl->textures_count);
+    TEST_ASSERT_EQUAL_UINT32(0, mdl->uvs_count);
+    TEST_ASSERT_EQUAL_UINT32(0, mdl->face_uvs_count);
+    TEST_ASSERT_NULL(mdl->uvs);
+    TEST_ASSERT_NULL(mdl->face_uvs);
     TEST_ASSERT_EQUAL_UINT32(KEK_TEXTURE_HANDLE_INVALID, mdl->texture);
     TEST_ASSERT_EQUAL_UINT8(0, mdl->owns_texture);
 }
@@ -112,7 +116,7 @@ void test_handles_that_were_never_issued_are_rejected(void) {
 }
 
 void test_a_null_engine_is_refused(void) {
-    TEST_ASSERT_EQUAL_UINT32(KEK_MODEL_HANDLE_INVALID, kek_model_create(0, 0, 0, 0));
+    TEST_ASSERT_EQUAL_UINT32(KEK_MODEL_HANDLE_INVALID, kek_model_create(0, 0, 0, 0, 0));
     TEST_ASSERT_EQUAL_UINT32(KEK_MODEL_HANDLE_INVALID, kek_model_clone(0, &KEK_CUBE_MODEL));
     TEST_ASSERT_EQUAL_UINT32(KEK_TEXTURE_HANDLE_INVALID, kek_texture_create(0, 1, 1));
     TEST_ASSERT_EQUAL_UINT32(KEK_TEXTURE_HANDLE_INVALID, kek_texture_clone(0, &SMALL_TEXTURE));
@@ -126,7 +130,7 @@ void test_a_null_engine_is_refused(void) {
 
 void test_a_destroyed_handle_is_stale_even_after_its_storage_is_reused(void) {
     int free_before = kek_test_free_models(&e);
-    KEK_ModelHandle first = kek_model_create(&e, 0, 0, 0);
+    KEK_ModelHandle first = kek_model_create(&e, 0, 0, 0, 0);
     KEK_ModelHandle second;
 
     kek_model_destroy(&e, first);
@@ -135,7 +139,7 @@ void test_a_destroyed_handle_is_stale_even_after_its_storage_is_reused(void) {
 
     /* Whatever the allocator hands out next — very likely the same storage —
        must not answer to the old handle. */
-    second = kek_model_create(&e, 0, 0, 0);
+    second = kek_model_create(&e, 0, 0, 0, 0);
     TEST_ASSERT_NOT_EQUAL(KEK_MODEL_HANDLE_INVALID, second);
     TEST_ASSERT_NOT_EQUAL(first, second);
     TEST_ASSERT_NULL(kek_model_get(&e, first));
@@ -167,7 +171,7 @@ void test_no_stale_handle_comes_back_over_many_reuses(void) {
     int i, j;
 
     for (i = 0; i < CYCLES; ++i) {
-        seen[i] = kek_model_create(&e, 0, 0, 0);
+        seen[i] = kek_model_create(&e, 0, 0, 0, 0);
         TEST_ASSERT_NOT_EQUAL(KEK_MODEL_HANDLE_INVALID, seen[i]);
         kek_model_destroy(&e, seen[i]);
     }
@@ -193,10 +197,10 @@ void test_the_pool_refuses_past_capacity_and_recovers(void) {
     TEST_ASSERT_GREATER_THAN_INT(0, free_textures);
 
     for (i = 0; i < free_models; ++i) {
-        last = kek_model_create(&e, 0, 0, 0);
+        last = kek_model_create(&e, 0, 0, 0, 0);
         TEST_ASSERT_NOT_EQUAL(KEK_MODEL_HANDLE_INVALID, last);
     }
-    TEST_ASSERT_EQUAL_UINT32(KEK_MODEL_HANDLE_INVALID, kek_model_create(&e, 0, 0, 0));
+    TEST_ASSERT_EQUAL_UINT32(KEK_MODEL_HANDLE_INVALID, kek_model_create(&e, 0, 0, 0, 0));
     TEST_ASSERT_EQUAL_UINT32(KEK_MODEL_HANDLE_INVALID, kek_model_clone(&e, &KEK_CUBE_MODEL));
 
     for (i = 0; i < free_textures; ++i) {
@@ -221,7 +225,7 @@ void test_init_empties_a_full_pool(void) {
     int free_models = kek_test_free_models(&e);
     int free_textures = kek_test_free_textures(&e);
 
-    while (kek_model_create(&e, 0, 0, 0) != KEK_MODEL_HANDLE_INVALID) {
+    while (kek_model_create(&e, 0, 0, 0, 0) != KEK_MODEL_HANDLE_INVALID) {
     }
     while (kek_texture_create(&e, 1, 1) != KEK_TEXTURE_HANDLE_INVALID) {
     }
@@ -240,22 +244,61 @@ void test_clone_copies_a_model_into_storage_of_its_own(void) {
     TEST_ASSERT_EQUAL_UINT32(KEK_CUBE_MODEL.verts_count, mdl->verts_count);
     TEST_ASSERT_EQUAL_UINT32(KEK_CUBE_MODEL.faces_count, mdl->faces_count);
     TEST_ASSERT_EQUAL_UINT32(KEK_CUBE_MODEL.colors_count, mdl->colors_count);
-    TEST_ASSERT_EQUAL_UINT32(KEK_CUBE_MODEL.textures_count, mdl->textures_count);
-    for (i = 0; i < mdl->verts_count; ++i) {
-        TEST_ASSERT_EQUAL_FLOAT(KEK_CUBE_MODEL.verts[i].x, mdl->verts[i].x);
-        TEST_ASSERT_EQUAL_FLOAT(KEK_CUBE_MODEL.verts[i].y, mdl->verts[i].y);
-        TEST_ASSERT_EQUAL_FLOAT(KEK_CUBE_MODEL.verts[i].z, mdl->verts[i].z);
-    }
-    for (i = 0; i < mdl->faces_count; ++i) {
-        TEST_ASSERT_EQUAL_UINT32(KEK_CUBE_MODEL.faces[i].a, mdl->faces[i].a);
-        TEST_ASSERT_EQUAL_UINT32(KEK_CUBE_MODEL.faces[i].b, mdl->faces[i].b);
-        TEST_ASSERT_EQUAL_UINT32(KEK_CUBE_MODEL.faces[i].c, mdl->faces[i].c);
-    }
+    TEST_ASSERT_EQUAL_UINT32(KEK_CUBE_MODEL.uvs_count, mdl->uvs_count);
+    TEST_ASSERT_EQUAL_UINT32(KEK_CUBE_MODEL.face_uvs_count, mdl->face_uvs_count);
+    TEST_ASSERT_EQUAL_MEMORY(&KEK_CUBE_MODEL.scale, &mdl->scale, sizeof(mdl->scale));
+    TEST_ASSERT_EQUAL_MEMORY(&KEK_CUBE_MODEL.offset, &mdl->offset, sizeof(mdl->offset));
+    TEST_ASSERT_EQUAL_MEMORY(KEK_CUBE_MODEL.verts, mdl->verts, sizeof(mdl->verts[0]) * mdl->verts_count);
+    TEST_ASSERT_EQUAL_MEMORY(KEK_CUBE_MODEL.faces, mdl->faces, sizeof(mdl->faces[0]) * mdl->faces_count);
     TEST_ASSERT_EQUAL_UINT8_ARRAY(KEK_CUBE_MODEL.face_colors, mdl->face_colors, mdl->colors_count);
+    TEST_ASSERT_EQUAL_MEMORY(KEK_CUBE_MODEL.uvs, mdl->uvs, sizeof(mdl->uvs[0]) * mdl->uvs_count);
+    TEST_ASSERT_EQUAL_MEMORY(KEK_CUBE_MODEL.face_uvs, mdl->face_uvs, sizeof(mdl->face_uvs[0]) * mdl->face_uvs_count);
+    for (i = 0; i < mdl->verts_count; ++i) {
+        KEK_FVec3 p = kek_model_position(mdl, (uint16_t)i);
+        TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.5f, p.x < 0.f ? -p.x : p.x);
+        TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.5f, p.y < 0.f ? -p.y : p.y);
+        TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.5f, p.z < 0.f ? -p.z : p.z);
+    }
 
     TEST_ASSERT_TRUE(mdl->verts != KEK_CUBE_MODEL.verts);
-    mdl->verts[0].x = 1234.f;
-    TEST_ASSERT_TRUE(KEK_CUBE_MODEL.verts[0].x != 1234.f);
+    TEST_ASSERT_TRUE(mdl->uvs != KEK_CUBE_MODEL.uvs);
+    mdl->verts[0].x = 77;
+    TEST_ASSERT_TRUE(KEK_CUBE_MODEL.verts[0].x != 77);
+}
+
+/* Quantising: the box's ends come back exactly, and everything else within
+   half a step of where it was. An axis with no depth stays exact with a step
+   of 0, and a NaN neither widens the box nor lands outside it. */
+void test_quantising_keeps_every_vertex_within_half_a_step(void) {
+    static KEK_FVec3 positions[64];
+    KEK_model* mdl = kek_model_get(&e, kek_model_create(&e, 64, 0, 0, 0));
+    uint16_t i;
+
+    TEST_ASSERT_NOT_NULL(mdl);
+    for (i = 0; i < 64; ++i) {
+        positions[i].x = -3.f + 0.137f * (float)i;
+        positions[i].y = 2.f + (float)((i * 37) % 64) * 0.01f;
+        positions[i].z = 5.f;
+    }
+    positions[0].x = -10.f;
+    positions[63].x = 10.f;
+    positions[10].y = NAN;
+
+    kek_model_quantise(mdl, positions);
+    TEST_ASSERT_EQUAL_FLOAT(20.f / 255.f, mdl->scale.x);
+    TEST_ASSERT_EQUAL_FLOAT(0.f, mdl->scale.z);
+    TEST_ASSERT_EQUAL_FLOAT(-10.f, kek_model_position(mdl, 0).x);
+    TEST_ASSERT_EQUAL_FLOAT(10.f, kek_model_position(mdl, 63).x);
+    for (i = 0; i < 64; ++i) {
+        KEK_FVec3 p = kek_model_position(mdl, i);
+        TEST_ASSERT_FLOAT_WITHIN(mdl->scale.x * 0.5f + 1e-5f, positions[i].x, p.x);
+        if (i != 10) {
+            TEST_ASSERT_FLOAT_WITHIN(mdl->scale.y * 0.5f + 1e-5f, positions[i].y, p.y);
+        }
+        TEST_ASSERT_EQUAL_FLOAT(5.f, p.z);
+    }
+    TEST_ASSERT_EQUAL_FLOAT(2.f, mdl->offset.y);
+    TEST_ASSERT_EQUAL_UINT8(0, mdl->verts[10].y);
 }
 
 void test_clone_copies_a_texture_into_storage_of_its_own(void) {
@@ -271,14 +314,17 @@ void test_clone_copies_a_texture_into_storage_of_its_own(void) {
 void test_a_clone_that_cannot_be_made_takes_nothing(void) {
     int free_models = kek_test_free_models(&e);
     int free_textures = kek_test_free_textures(&e);
-    KEK_model too_many_verts = KEK_CUBE_MODEL;
+    KEK_model too_many_colors = KEK_CUBE_MODEL;
+    KEK_model too_many_face_uvs = KEK_CUBE_MODEL;
     KEK_texture no_pixels = { 0, 4, 4 };
     KEK_texture too_large = { TEXTURE_PIXELS, 65535, 65535 };
 
-    too_many_verts.verts_count = 0xFFFFFFFFu;
+    too_many_colors.colors_count = (uint16_t)(KEK_CUBE_MODEL.faces_count + 1);
+    too_many_face_uvs.face_uvs_count = (uint16_t)(KEK_CUBE_MODEL.faces_count + 1);
 
     TEST_ASSERT_EQUAL_UINT32(KEK_MODEL_HANDLE_INVALID, kek_model_clone(&e, 0));
-    TEST_ASSERT_EQUAL_UINT32(KEK_MODEL_HANDLE_INVALID, kek_model_clone(&e, &too_many_verts));
+    TEST_ASSERT_EQUAL_UINT32(KEK_MODEL_HANDLE_INVALID, kek_model_clone(&e, &too_many_colors));
+    TEST_ASSERT_EQUAL_UINT32(KEK_MODEL_HANDLE_INVALID, kek_model_clone(&e, &too_many_face_uvs));
     TEST_ASSERT_EQUAL_UINT32(KEK_TEXTURE_HANDLE_INVALID, kek_texture_clone(&e, 0));
     TEST_ASSERT_EQUAL_UINT32(KEK_TEXTURE_HANDLE_INVALID, kek_texture_clone(&e, &no_pixels));
     TEST_ASSERT_EQUAL_UINT32(KEK_TEXTURE_HANDLE_INVALID, kek_texture_clone(&e, &too_large));
@@ -381,6 +427,7 @@ int main(void) {
     RUN_TEST(test_the_pool_refuses_past_capacity_and_recovers);
     RUN_TEST(test_init_empties_a_full_pool);
     RUN_TEST(test_clone_copies_a_model_into_storage_of_its_own);
+    RUN_TEST(test_quantising_keeps_every_vertex_within_half_a_step);
     RUN_TEST(test_clone_copies_a_texture_into_storage_of_its_own);
     RUN_TEST(test_a_clone_that_cannot_be_made_takes_nothing);
     RUN_TEST(test_destroying_a_model_releases_the_texture_it_owns);

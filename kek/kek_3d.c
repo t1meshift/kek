@@ -11,7 +11,6 @@
 
 #define KEK_PI 3.14159265358979323846f
 #define KEK_EPSILON 0.000001f
-#define KEK_IS_NAN(value) ((value) != (value))
 
 KEK_camera KEK_DEFAULT_CAMERA = {
     .position = {0.f, 0.f, 0.f},
@@ -115,6 +114,21 @@ KEK_FVec3 kek_3d_rotate(KEK_FVec3 p, KEK_FVec3 r) {
         .y = sinf(r.x) * d3 + d2 * cosf(r.x),
         .z = cosf(r.x) * d3 - d2 * sinf(r.x)
     };
+}
+
+/* a * b: applying it is applying b, then a. */
+static KEK_Mat3 kek_3d_mat3_mul(KEK_Mat3 a, KEK_Mat3 b) {
+    KEK_Mat3 result;
+    int row, col;
+
+    for (row = 0; row < 3; ++row) {
+        for (col = 0; col < 3; ++col) {
+            result.m[row * 3 + col] = a.m[row * 3 + 0] * b.m[0 * 3 + col] +
+                                      a.m[row * 3 + 1] * b.m[1 * 3 + col] +
+                                      a.m[row * 3 + 2] * b.m[2 * 3 + col];
+        }
+    }
+    return result;
 }
 
 KEK_FVec3 kek_3d_translate(KEK_FVec3 p, KEK_FVec3 delta) {
@@ -884,17 +898,14 @@ void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FV
        the model draws untextured. */
     KEK_texture* texture = kek_texture_get(e, mdl->texture);
     /* Fix 4: precompute rotation matrices and projection constants once per call */
-    KEK_Mat3 model_rot, camera_rot;
-    KEK_FVec3 light_view;
+    KEK_Mat3 model_rot, camera_rot, to_view;
+    KEK_FVec3 light_view, origin;
     float aspect_ratio, focal_length, half_w, half_h;
     uint32_t i;
+    int row;
 
-    /* A model the arena has no room to transform is not drawn. The product
-       can only wrap where size_t is 32 bits, and the division catches that. */
+    /* A model the arena has no room to transform is not drawn. */
     view_verts_size = (size_t)mdl->verts_count * sizeof(KEK_FVec3);
-    if (view_verts_size / sizeof(KEK_FVec3) != mdl->verts_count) {
-        return;
-    }
     view_verts = (KEK_FVec3*)kek_arena_temp(&e->arena, view_verts_size);
     if (!view_verts) {
         return;
@@ -911,19 +922,33 @@ void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FV
     half_w       = (float)e->w * 0.5f;
     half_h       = (float)e->h * 0.5f;
 
-    /* Transform all vertices to view space using precomputed matrices */
+    /* A stored vertex q is at offset + scale * q in the model, so in view
+       space it is camera_rot * (model_rot * (offset + scale * q) + pos -
+       camera): one matrix, the rotations with the scale folded into their
+       columns, and one translation, so taking the bytes back to float costs
+       nothing beyond the conversion. */
+    to_view = kek_3d_mat3_mul(camera_rot, model_rot);
+    for (row = 0; row < 3; ++row) {
+        to_view.m[row * 3 + 0] *= mdl->scale.x;
+        to_view.m[row * 3 + 1] *= mdl->scale.y;
+        to_view.m[row * 3 + 2] *= mdl->scale.z;
+    }
+    origin = kek_3d_translate(kek_mat3_apply(model_rot, mdl->offset), pos);
+    origin = kek_mat3_apply(camera_rot, (KEK_FVec3){
+        origin.x - camera->position.x,
+        origin.y - camera->position.y,
+        origin.z - camera->position.z });
+
     for (i = 0; i < mdl->verts_count; ++i) {
-        KEK_FVec3 world = kek_3d_translate(kek_mat3_apply(model_rot, mdl->verts[i]), pos);
-        view_verts[i] = kek_mat3_apply(camera_rot, (KEK_FVec3){
-            world.x - camera->position.x,
-            world.y - camera->position.y,
-            world.z - camera->position.z });
+        KEK_model_vertex q = mdl->verts[i];
+        view_verts[i] = kek_3d_translate(
+            kek_mat3_apply(to_view, (KEK_FVec3){ (float)q.x, (float)q.y, (float)q.z }), origin);
     }
 
     for (i = 0; i < mdl->faces_count; ++i) {
         KEK_model_face face = mdl->faces[i];
         uint8_t color = use_colors && i < mdl->colors_count ? mdl->face_colors[i] : 15;
-        KEK_model_face_uv face_uv;
+        KEK_model_face_uv face_uv = { 0, 0, 0 };
         char face_is_textured;
         KEK_FVec3 fv[3];
         KEK_FVec2 fuv[3];
@@ -932,17 +957,14 @@ void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FV
         float face_shade;
         int cn, tri_count, t;
 
-        face_uv = i < mdl->textures_count ? mdl->face_textures[i] : (KEK_model_face_uv) {
-            .a = {NAN, NAN},
-            .b = {NAN, NAN},
-            .c = {NAN, NAN}
-        };
-        face_is_textured = texture != 0 &&
-            mdl->face_textures != 0 &&
-            i < mdl->textures_count &&
-            !KEK_IS_NAN(face_uv.a.x) && !KEK_IS_NAN(face_uv.a.y) &&
-            !KEK_IS_NAN(face_uv.b.x) && !KEK_IS_NAN(face_uv.b.y) &&
-            !KEK_IS_NAN(face_uv.c.x) && !KEK_IS_NAN(face_uv.c.y);
+        /* KEK_MODEL_UV_NONE is past every uvs_count, so a corner without a
+           UV fails the same test as one out of range. */
+        face_is_textured = texture != 0 && mdl->face_uvs != 0 && mdl->uvs != 0 && i < mdl->face_uvs_count;
+        if (face_is_textured) {
+            face_uv = mdl->face_uvs[i];
+            face_is_textured = face_uv.a < mdl->uvs_count && face_uv.b < mdl->uvs_count &&
+                               face_uv.c < mdl->uvs_count;
+        }
 
         fv[0] = view_verts[face.a];
         fv[1] = view_verts[face.b];
@@ -958,7 +980,7 @@ void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FV
         face_shade = kek_3d_face_shade(fv, light_view, e->light.ambient);
 
         if (face_is_textured) {
-            fuv[0] = face_uv.a; fuv[1] = face_uv.b; fuv[2] = face_uv.c;
+            fuv[0] = mdl->uvs[face_uv.a]; fuv[1] = mdl->uvs[face_uv.b]; fuv[2] = mdl->uvs[face_uv.c];
         } else {
             fuv[0] = fuv[1] = fuv[2] = (KEK_FVec2){0.f, 0.f};
         }

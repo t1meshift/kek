@@ -339,7 +339,8 @@ void test_a_model_too_big_to_transform_draws_nothing(void) {
     KEK_model huge = *kek_model_get(&e, kek_default_cube_model_handle(&e));
     size_t free_bytes = kek_arena_available(&e);
 
-    huge.verts_count = 0x10000000u;
+    /* 65535 view-space vertices are 786,420 bytes, past the test arena. */
+    huge.verts_count = 0xFFFFu;
     kek_3d_draw_model(&e, &huge, &camera, (KEK_FVec3){ 0.f, 0.f, 3.f }, (KEK_FVec3){ 0.f, 0.f, 0.f });
     TEST_ASSERT_EQUAL_INT(0, kek_test_frame_painted(&e));
     TEST_ASSERT_EQUAL_size_t(free_bytes, kek_arena_available(&e));
@@ -382,10 +383,11 @@ void test_cubes_through_the_near_plane_and_off_the_edges_stay_in_the_frame(void)
    area passes INT_MAX. The backface test has to get the sign right anyway:
    one winding draws, the other draws nothing. */
 static void draw_wall(int facing_camera) {
-    static KEK_FVec3 verts[4] = {
+    static const KEK_FVec3 positions[4] = {
         { 35.f, -2.f, -50.f }, { 35.f, 80.f, -50.f },
         { 35.f, 80.f,  50.f }, { 35.f, -2.f,  50.f }
     };
+    static KEK_model_vertex verts[4];
     static const KEK_model_face front[2] = { { 0, 2, 1 }, { 0, 3, 2 } };
     static KEK_model_face faces[2];
     KEK_camera camera = KEK_DEFAULT_CAMERA;
@@ -407,6 +409,7 @@ static void draw_wall(int facing_camera) {
     wall.verts_count = 4;
     wall.faces_count = 2;
     wall.texture = KEK_TEXTURE_HANDLE_INVALID;
+    kek_model_quantise(&wall, positions);
     kek_3d_draw_model(&e, &wall, &camera, zero, zero);
 }
 
@@ -446,22 +449,19 @@ static KEK_3D_ProjectedVertex vertex_shaded(int x, int y, float depth, float sha
    Corners in order around the panel; the faces wind them so that
    cross(b - a, c - a) points the way the panel faces. */
 static void draw_panel(const KEK_FVec3 corners[4], const KEK_camera* camera) {
-    static KEK_FVec3 verts[4];
+    static KEK_model_vertex verts[4];
     static const KEK_model_face faces[2] = { { 0, 2, 1 }, { 0, 3, 2 } };
     KEK_camera cam = *camera;
     KEK_model panel;
     KEK_FVec3 zero = { 0.f, 0.f, 0.f };
-    size_t i;
 
-    for (i = 0; i < 4; ++i) {
-        verts[i] = corners[i];
-    }
     memset(&panel, 0, sizeof(panel));
     panel.verts = verts;
     panel.faces = (KEK_model_face*)faces;
     panel.verts_count = 4;
     panel.faces_count = 2;
     panel.texture = KEK_TEXTURE_HANDLE_INVALID;
+    kek_model_quantise(&panel, corners);
     kek_3d_draw_model(&e, &panel, &cam, zero, zero);
 }
 

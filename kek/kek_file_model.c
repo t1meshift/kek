@@ -1,4 +1,3 @@
-#include <math.h>
 #include <string.h>
 #include "kek_file_model.h"
 #include "kek_file_image.h"
@@ -123,26 +122,24 @@ static KEK_ModelHandle kek_file_model_load_(KEK_engine *e, const char *path) {
         return KEK_MODEL_HANDLE_INVALID;
     }
 
-    /* face_textures is one UV triple per face, so it is sized by faces_count
-       like every other per-face array, whatever uv_count says. */
+    /* The UVs are kept as the file has them, all uv_count of them, and each
+       face keeps its three indices into them. */
     if ((hdr.flags & KEK_FILEMODEL_HAS_FACE_COLORS) != 0) {
         model_flags |= KEK_MODEL_FACE_COLORS;
     }
     if ((hdr.flags & KEK_FILEMODEL_HAS_TEXTURE) != 0) {
         model_flags |= KEK_MODEL_FACE_UVS;
     }
-    model_handle = kek_model_create(e, hdr.vertices_count, hdr.faces_count, model_flags);
+    model_handle = kek_model_create(e, hdr.vertices_count, hdr.faces_count, hdr.uv_count, model_flags);
     out_model = kek_model_get(e, model_handle);
     if (model_handle == KEK_MODEL_HANDLE_INVALID || !out_model) {
         kek_asset_close(&stream);
         return KEK_MODEL_HANDLE_INVALID;
     }
 
-    memcpy(out_model->verts, vertices, sizeof(vertices[0]) * hdr.vertices_count);
-    out_model->verts_count = hdr.vertices_count;
-    out_model->faces_count = hdr.faces_count;
+    kek_model_quantise(out_model, vertices);
     out_model->colors_count = 0;
-    out_model->textures_count = 0;
+    out_model->face_uvs_count = 0;
     out_model->texture = KEK_TEXTURE_HANDLE_INVALID;
     out_model->owns_texture = 0;
 
@@ -193,21 +190,19 @@ static KEK_ModelHandle kek_file_model_load_(KEK_engine *e, const char *path) {
             return KEK_MODEL_HANDLE_INVALID;
         }
 
-        for (uint16_t i = 0; i < hdr.faces_count; ++i) {
-            KEK_model_face_uv* face_uv = &out_model->face_textures[i];
-            for (uint16_t j = 0; j < 3; ++j) {
-                KEK_FVec2 uv = {NAN, NAN};
-
-                if (faces[i].v[j].uv != KEK_FILEMODEL_INDEX_NONE) {
-                    uv = uvs[faces[i].v[j].uv];
-                }
-
-                if (j == 0) face_uv->a = uv;
-                if (j == 1) face_uv->b = uv;
-                if (j == 2) face_uv->c = uv;
-            }
+        /* KEK_FILEMODEL_INDEX_NONE is KEK_MODEL_UV_NONE, so a corner without
+           a UV stays without one. */
+        if (hdr.uv_count > 0) {
+            memcpy(out_model->uvs, uvs, sizeof(uvs[0]) * hdr.uv_count);
         }
-        out_model->textures_count = hdr.faces_count;
+        for (uint16_t i = 0; i < hdr.faces_count; ++i) {
+            out_model->face_uvs[i] = (KEK_model_face_uv) {
+                .a = faces[i].v[0].uv,
+                .b = faces[i].v[1].uv,
+                .c = faces[i].v[2].uv
+            };
+        }
+        out_model->face_uvs_count = hdr.faces_count;
 
         texture_handle = kek_file_image_load(e, texture_name);
         if (texture_handle == KEK_TEXTURE_HANDLE_INVALID) {

@@ -27,39 +27,29 @@ static uint16_t kek_pool_generation(uint32_t handle) {
 }
 
 /* A model's arrays, one after another in one block, each on an alignment
-   boundary. Offsets into the block; absent arrays take no room. */
+   boundary. Offsets into the block; absent arrays take no room. Every count
+   is 16 bits, so no size here comes near wrapping. */
 typedef struct KEK_ModelLayout_ {
     size_t faces;
     size_t colors;
     size_t uvs;
+    size_t face_uvs;
     size_t total;
 } KEK_ModelLayout_;
 
-/* No array gets past an eighth of SIZE_MAX, so the four of them, rounded, add
-   up without wrapping — a limit that only a 32-bit target can reach. */
-static int kek_pool_array_size_(uint32_t count, size_t element, size_t* out) {
-    if (count > (SIZE_MAX / 8u) / element) {
-        return 0;
-    }
-    *out = KEK_MEMORY_ROUND_((size_t)count * element);
-    return 1;
+static size_t kek_pool_array_size_(uint16_t count, size_t element) {
+    return KEK_MEMORY_ROUND_((size_t)count * element);
 }
 
-static int kek_pool_model_layout_(uint32_t verts_count, uint32_t faces_count, unsigned flags,
-                                  KEK_ModelLayout_* out) {
-    size_t verts, faces, colors = 0, uvs = 0;
+static void kek_pool_model_layout_(uint16_t verts_count, uint16_t faces_count, uint16_t uvs_count, unsigned flags,
+                                   KEK_ModelLayout_* out) {
+    int has_uvs = (flags & KEK_MODEL_FACE_UVS) != 0;
 
-    if (!kek_pool_array_size_(verts_count, sizeof(KEK_FVec3), &verts) ||
-        !kek_pool_array_size_(faces_count, sizeof(KEK_model_face), &faces) ||
-        ((flags & KEK_MODEL_FACE_COLORS) && !kek_pool_array_size_(faces_count, 1u, &colors)) ||
-        ((flags & KEK_MODEL_FACE_UVS) && !kek_pool_array_size_(faces_count, sizeof(KEK_model_face_uv), &uvs))) {
-        return 0;
-    }
-    out->faces = verts;
-    out->colors = out->faces + faces;
-    out->uvs = out->colors + colors;
-    out->total = out->uvs + uvs;
-    return 1;
+    out->faces = kek_pool_array_size_(verts_count, sizeof(KEK_model_vertex));
+    out->colors = out->faces + kek_pool_array_size_(faces_count, sizeof(KEK_model_face));
+    out->uvs = out->colors + ((flags & KEK_MODEL_FACE_COLORS) ? kek_pool_array_size_(faces_count, 1u) : 0);
+    out->face_uvs = out->uvs + (has_uvs ? kek_pool_array_size_(uvs_count, sizeof(KEK_FVec2)) : 0);
+    out->total = out->face_uvs + (has_uvs ? kek_pool_array_size_(faces_count, sizeof(KEK_model_face_uv)) : 0);
 }
 
 static int kek_pool_free_model_slot_(const KEK_engine* e, uint16_t* out_index) {
@@ -237,18 +227,20 @@ void kek_texture_destroy(KEK_engine* e, KEK_TextureHandle handle) {
     kek_pool_retire_texture_slot_(slot);
 }
 
-KEK_ModelHandle kek_model_create(KEK_engine* e, uint32_t verts_count, uint32_t faces_count, unsigned flags) {
+KEK_ModelHandle kek_model_create(KEK_engine* e, uint16_t verts_count, uint16_t faces_count, uint16_t uvs_count,
+                                 unsigned flags) {
     KEK_ModelPoolSlot* slot;
     KEK_ModelLayout_ layout;
     KEK_model* mdl;
     uint16_t index;
     size_t block;
     unsigned char* data;
+    int has_uvs = (flags & KEK_MODEL_FACE_UVS) != 0;
 
-    if (!e || !kek_pool_free_model_slot_(e, &index) ||
-        !kek_pool_model_layout_(verts_count, faces_count, flags, &layout)) {
+    if (!e || !kek_pool_free_model_slot_(e, &index)) {
         return KEK_MODEL_HANDLE_INVALID;
     }
+    kek_pool_model_layout_(verts_count, faces_count, uvs_count, flags, &layout);
     data = (unsigned char*)kek_arena_alloc(&e->arena, layout.total, &block);
     if (!data) {
         return KEK_MODEL_HANDLE_INVALID;
@@ -259,16 +251,20 @@ KEK_ModelHandle kek_model_create(KEK_engine* e, uint32_t verts_count, uint32_t f
     mdl = &slot->model;
     /* Every offset in the layout is on an alignment boundary, and so is the
        block, which is what makes these casts sound. */
-    mdl->verts = (KEK_FVec3*)data;
+    mdl->verts = (KEK_model_vertex*)data;
+    mdl->scale = (KEK_FVec3){ 0.f, 0.f, 0.f };
+    mdl->offset = (KEK_FVec3){ 0.f, 0.f, 0.f };
     mdl->faces = (KEK_model_face*)(data + layout.faces);
     mdl->face_colors = (flags & KEK_MODEL_FACE_COLORS) ? data + layout.colors : 0;
-    mdl->face_textures = (flags & KEK_MODEL_FACE_UVS) ? (KEK_model_face_uv*)(data + layout.uvs) : 0;
+    mdl->uvs = has_uvs ? (KEK_FVec2*)(data + layout.uvs) : 0;
+    mdl->face_uvs = has_uvs ? (KEK_model_face_uv*)(data + layout.face_uvs) : 0;
     mdl->texture = KEK_TEXTURE_HANDLE_INVALID;
     mdl->owns_texture = 0;
     mdl->verts_count = verts_count;
     mdl->faces_count = faces_count;
     mdl->colors_count = (flags & KEK_MODEL_FACE_COLORS) ? faces_count : 0;
-    mdl->textures_count = (flags & KEK_MODEL_FACE_UVS) ? faces_count : 0;
+    mdl->uvs_count = has_uvs ? uvs_count : 0;
+    mdl->face_uvs_count = has_uvs ? faces_count : 0;
     slot->block = block;
     slot->used = 1;
     return kek_pool_make_model_handle(index, slot->generation);
@@ -278,25 +274,26 @@ KEK_ModelHandle kek_model_clone(KEK_engine* e, const KEK_model* source) {
     KEK_ModelHandle handle;
     KEK_model* mdl;
     unsigned flags = 0;
-    uint32_t colors_count, textures_count;
+    uint16_t colors_count, face_uvs_count, uvs_count;
 
     if (!source || !source->verts || !source->faces) {
         return KEK_MODEL_HANDLE_INVALID;
     }
     colors_count = source->face_colors ? source->colors_count : 0;
-    textures_count = source->face_textures ? source->textures_count : 0;
+    face_uvs_count = source->face_uvs && source->uvs ? source->face_uvs_count : 0;
+    uvs_count = face_uvs_count > 0 ? source->uvs_count : 0;
     /* Every per-face array is sized by faces_count, here and in the source. */
-    if (colors_count > source->faces_count || textures_count > source->faces_count) {
+    if (colors_count > source->faces_count || face_uvs_count > source->faces_count) {
         return KEK_MODEL_HANDLE_INVALID;
     }
     if (colors_count > 0) {
         flags |= KEK_MODEL_FACE_COLORS;
     }
-    if (textures_count > 0) {
+    if (face_uvs_count > 0) {
         flags |= KEK_MODEL_FACE_UVS;
     }
 
-    handle = kek_model_create(e, source->verts_count, source->faces_count, flags);
+    handle = kek_model_create(e, source->verts_count, source->faces_count, uvs_count, flags);
     mdl = kek_model_get(e, handle);
     if (!mdl) {
         return KEK_MODEL_HANDLE_INVALID;
@@ -304,14 +301,17 @@ KEK_ModelHandle kek_model_clone(KEK_engine* e, const KEK_model* source) {
 
     memcpy(mdl->verts, source->verts, sizeof(mdl->verts[0]) * source->verts_count);
     memcpy(mdl->faces, source->faces, sizeof(mdl->faces[0]) * source->faces_count);
+    mdl->scale = source->scale;
+    mdl->offset = source->offset;
     if (colors_count > 0) {
         memcpy(mdl->face_colors, source->face_colors, colors_count);
     }
-    if (textures_count > 0) {
-        memcpy(mdl->face_textures, source->face_textures, sizeof(mdl->face_textures[0]) * textures_count);
+    if (face_uvs_count > 0) {
+        memcpy(mdl->uvs, source->uvs, sizeof(mdl->uvs[0]) * uvs_count);
+        memcpy(mdl->face_uvs, source->face_uvs, sizeof(mdl->face_uvs[0]) * face_uvs_count);
     }
     mdl->colors_count = colors_count;
-    mdl->textures_count = textures_count;
+    mdl->face_uvs_count = face_uvs_count;
     /* The clone points at the same texture but never owns it — only the
        original gets to release that slot. */
     mdl->texture = source->texture;

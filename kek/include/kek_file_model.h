@@ -10,8 +10,11 @@ extern "C" {
 #include "kek.h"
 #include "kek_macro.h"
 #include "kek_math.h"
+#include "kek_model.h"
 
 #define KEK_FILEMODEL_INDEX_NONE (0xFFFFu)
+/* The loader copies UV indices straight into KEK_model_face_uv. */
+KEK_STATIC_ASSERT_DECL(kmf_index_none_is_model_uv_none, KEK_FILEMODEL_INDEX_NONE == KEK_MODEL_UV_NONE);
 
 typedef enum KEK_FileModel_Flags {
     KEK_FILEMODEL_HAS_FACE_COLORS = 1 << 0,

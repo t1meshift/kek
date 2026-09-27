@@ -27,7 +27,7 @@ int kek_test_free_models(KEK_engine* e) {
     int i;
 
     while (count < KEK_TEST_MAX_HANDLES) {
-        KEK_ModelHandle handle = kek_model_create(e, 0, 0, 0);
+        KEK_ModelHandle handle = kek_model_create(e, 0, 0, 0, 0);
         if (handle == KEK_MODEL_HANDLE_INVALID) {
             break;
         }

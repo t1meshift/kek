@@ -94,11 +94,18 @@ vertex has to say `0xFFFF`, because no index is below zero.
   normals, because flat shading derives a face's normal from its vertices at
   draw time. They stay in the format for smooth shading, should it come, and
   cost the file 12 bytes each, not the engine.
-- **UVs are expanded to three per face**, a pair per corner whatever the file
-  indexed, so `face_textures` is sized by `faces_count`, not by `uv_count`.
-- **Missing UVs become NaN.** Under `HAS_TEXTURE`, a corner with no UV index
-  gets `{NAN, NAN}` rather than `{0, 0}`, so it is visibly wrong rather than
-  quietly sampling the corner of the texture.
+- **Vertices are quantised to a byte an axis.** The loader takes the box
+  around them and keeps each vertex as the nearest of 256 steps across it,
+  with the box's corner and step size as the model's `offset` and `scale`, as
+  Quake's MDL stored them. A vertex comes back within half a step, 0.2% of
+  the model's size along that axis; the file keeps full floats.
+- **UVs stay indexed.** All `uv_count` of them are kept as the file has them,
+  and each face keeps its three indices into them, so `uvs` is sized by
+  `uv_count` and `face_uvs` by `faces_count`. Without `HAS_TEXTURE` neither
+  is kept.
+- **A corner without a UV stays without one.** Its index is `0xFFFF`, which is
+  `KEK_MODEL_UV_NONE`, and a face with such a corner is drawn in its colour
+  rather than quietly sampling the corner of the texture.
 - **The model owns the texture it loaded.** `KEK_model.owns_texture` is set, and
   `kek_model_destroy` releases the texture handle with it. A clone shares the
   handle and never the ownership.

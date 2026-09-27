@@ -259,23 +259,31 @@ void test_destroying_in_order_gives_everything_back_with_the_last(void) {
 
 void test_a_full_arena_refuses_cleanly_and_recovers(void) {
     KEK_TextureHandle last = KEK_TEXTURE_HANDLE_INVALID;
+    KEK_TextureHandle rest;
     KEK_TextureHandle handle;
     KEK_engine e;
-    size_t full;
+    size_t left;
 
     init(&e);
     while ((handle = kek_texture_create(&e, 32, 32)) != KEK_TEXTURE_HANDLE_INVALID) {
         last = handle;
     }
     TEST_ASSERT_NOT_EQUAL(KEK_TEXTURE_HANDLE_INVALID, last);
-    full = kek_arena_available(&e);
-    TEST_ASSERT_LESS_THAN_size_t(32 * 32 + KEK_MEMORY_ALIGN, full);
+    left = kek_arena_available(&e);
+    TEST_ASSERT_LESS_THAN_size_t(32 * 32 + KEK_MEMORY_ALIGN, left);
+    /* Less than another of those, but room for a small model: one texture
+       of just that size takes the rest. */
+    TEST_ASSERT_GREATER_THAN_size_t(KEK_MEMORY_ALIGN, left);
+    rest = kek_texture_create(&e, 1, (uint16_t)(left - KEK_MEMORY_ALIGN));
+    TEST_ASSERT_NOT_EQUAL(KEK_TEXTURE_HANDLE_INVALID, rest);
+    TEST_ASSERT_EQUAL_size_t(0, kek_arena_available(&e));
 
-    TEST_ASSERT_EQUAL_UINT32(KEK_MODEL_HANDLE_INVALID, kek_model_create(&e, 100, 100, 0));
+    TEST_ASSERT_EQUAL_UINT32(KEK_MODEL_HANDLE_INVALID, kek_model_create(&e, 100, 100, 0, 0));
     TEST_ASSERT_EQUAL_UINT32(KEK_MODEL_HANDLE_INVALID, kek_model_clone(&e, &KEK_CUBE_MODEL));
-    TEST_ASSERT_EQUAL_size_t(full, kek_arena_available(&e));
+    TEST_ASSERT_EQUAL_size_t(0, kek_arena_available(&e));
     TEST_ASSERT_NOT_NULL(kek_texture_get(&e, last));
 
+    kek_texture_destroy(&e, rest);
     kek_texture_destroy(&e, last);
     TEST_ASSERT_NOT_EQUAL(KEK_TEXTURE_HANDLE_INVALID, kek_texture_create(&e, 32, 32));
 }

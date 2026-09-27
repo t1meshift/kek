@@ -142,7 +142,7 @@ static Corner corner(uint16_t vertex, uint16_t normal, uint16_t uv) {
 
 /* A unit quad in z = 0 as two faces, textured and coloured, with two stored
    normals (the loader checks their indices and skips them), a corner with no
-   normal and a corner with no UV (it becomes NaN). */
+   normal and a corner with no UV. */
 static void good_model(void) {
     memcpy(kmf.magic, "KMDL", 4);
     kmf.version = 1;
@@ -260,6 +260,12 @@ static void assert_face(uint32_t a, uint32_t b, uint32_t c, KEK_model_face actua
     TEST_ASSERT_EQUAL_UINT32(c, actual.c);
 }
 
+static void assert_face_uv(uint32_t a, uint32_t b, uint32_t c, KEK_model_face_uv actual) {
+    TEST_ASSERT_EQUAL_UINT32(a, actual.a);
+    TEST_ASSERT_EQUAL_UINT32(b, actual.b);
+    TEST_ASSERT_EQUAL_UINT32(c, actual.c);
+}
+
 static void assert_uv(float u, float v, KEK_FVec2 actual) {
     TEST_ASSERT_EQUAL_FLOAT(u, actual.x);
     TEST_ASSERT_EQUAL_FLOAT(v, actual.y);
@@ -284,9 +290,11 @@ void test_a_textured_model_round_trips(void) {
     mdl = kek_model_get(&e, handle);
     TEST_ASSERT_NOT_NULL(mdl);
 
+    /* The quad's corners are the ends of its box, which quantising keeps. */
     TEST_ASSERT_EQUAL_UINT32(4, mdl->verts_count);
     for (i = 0; i < 4; ++i) {
-        assert_vec3(kmf.vertices[i].x, kmf.vertices[i].y, kmf.vertices[i].z, mdl->verts[i]);
+        assert_vec3(kmf.vertices[i].x, kmf.vertices[i].y, kmf.vertices[i].z,
+                    kek_model_position(mdl, (uint16_t)i));
     }
 
     TEST_ASSERT_EQUAL_UINT32(2, mdl->faces_count);
@@ -297,17 +305,18 @@ void test_a_textured_model_round_trips(void) {
     TEST_ASSERT_EQUAL_UINT8(40, mdl->face_colors[0]);
     TEST_ASSERT_EQUAL_UINT8(41, mdl->face_colors[1]);
 
-    /* UVs expanded per face corner; the corner without one is NaN, so it
-       reads as wrong rather than as the texture's corner. They follow the
+    /* The UVs as the file has them, and each face's indices into them; the
+       corner without one keeps KEK_MODEL_UV_NONE, which draws the face
+       untextured rather than sampling the texture's corner. They follow the
        normals in the file, so they are also what shows the normals were
        skipped by exactly their length. */
-    TEST_ASSERT_EQUAL_UINT32(2, mdl->textures_count);
-    assert_uv(0.f, 0.f, mdl->face_textures[0].a);
-    assert_uv(1.f, 0.f, mdl->face_textures[0].b);
-    assert_uv(1.f, 1.f, mdl->face_textures[0].c);
-    assert_uv(0.f, 0.f, mdl->face_textures[1].a);
-    assert_uv(1.f, 1.f, mdl->face_textures[1].b);
-    TEST_ASSERT_TRUE(isnan(mdl->face_textures[1].c.x) && isnan(mdl->face_textures[1].c.y));
+    TEST_ASSERT_EQUAL_UINT32(4, mdl->uvs_count);
+    for (i = 0; i < 4; ++i) {
+        assert_uv(kmf.uvs[i].x, kmf.uvs[i].y, mdl->uvs[i]);
+    }
+    TEST_ASSERT_EQUAL_UINT32(2, mdl->face_uvs_count);
+    assert_face_uv(0, 1, 2, mdl->face_uvs[0]);
+    assert_face_uv(0, 2, KEK_MODEL_UV_NONE, mdl->face_uvs[1]);
 
     texture = kek_texture_get(&e, mdl->texture);
     TEST_ASSERT_NOT_NULL(texture);
@@ -340,7 +349,8 @@ void test_a_bare_model_loads(void) {
     TEST_ASSERT_EQUAL_UINT32(4, mdl->verts_count);
     TEST_ASSERT_EQUAL_UINT32(2, mdl->faces_count);
     TEST_ASSERT_EQUAL_UINT32(0, mdl->colors_count);
-    TEST_ASSERT_EQUAL_UINT32(0, mdl->textures_count);
+    TEST_ASSERT_EQUAL_UINT32(0, mdl->uvs_count);
+    TEST_ASSERT_EQUAL_UINT32(0, mdl->face_uvs_count);
     TEST_ASSERT_EQUAL_UINT32(KEK_TEXTURE_HANDLE_INVALID, mdl->texture);
     TEST_ASSERT_EQUAL_UINT8(0, mdl->owns_texture);
 
@@ -363,8 +373,8 @@ void test_normals_are_skipped_whatever_their_count(void) {
         handle = load();
         mdl = kek_model_get(&e, handle);
         TEST_ASSERT_NOT_NULL(mdl);
-        assert_uv(1.f, 0.f, mdl->face_textures[0].b);
-        assert_uv(1.f, 1.f, mdl->face_textures[1].b);
+        assert_uv(1.f, 0.f, mdl->uvs[mdl->face_uvs[0].b]);
+        assert_uv(1.f, 1.f, mdl->uvs[mdl->face_uvs[1].b]);
         TEST_ASSERT_EQUAL_UINT8(41, mdl->face_colors[1]);
         kek_model_destroy(&e, handle);
     }
@@ -394,9 +404,9 @@ void test_a_large_model_loads(void) {
     TEST_ASSERT_EQUAL_UINT32(LARGE, mdl->colors_count);
 }
 
-/* face_textures holds a UV triple per face, not per UV. When one limit bounded
-   both, a textured model with more faces than that limit wrote past its slot
-   (89c8fb3). Now the array is sized by faces_count, whatever uv_count is. */
+/* face_uvs holds an index triple per face and uvs one pair per UV, each sized
+   by its own count. When one limit bounded both, a textured model with more
+   faces than that limit wrote past its slot (89c8fb3). */
 void test_a_textured_model_with_more_faces_than_uvs_loads(void) {
     KEK_model* mdl;
     uint16_t i;
@@ -416,11 +426,11 @@ void test_a_textured_model_with_more_faces_than_uvs_loads(void) {
 
     mdl = kek_model_get(&e, load());
     TEST_ASSERT_NOT_NULL(mdl);
-    TEST_ASSERT_EQUAL_UINT32(LARGE + 1, mdl->textures_count);
-    assert_uv(0.f, 0.f, mdl->face_textures[LARGE].a);
-    assert_uv(1.f, 0.f, mdl->face_textures[LARGE].b);
-    assert_uv(0.f, 0.f, mdl->face_textures[LARGE].c); /* uv LARGE % LARGE */
-    assert_uv((float)(LARGE - 1), 0.f, mdl->face_textures[LARGE - 1].c);
+    TEST_ASSERT_EQUAL_UINT32(LARGE + 1, mdl->face_uvs_count);
+    TEST_ASSERT_EQUAL_UINT32(LARGE, mdl->uvs_count);
+    assert_face_uv(0, 1, 0, mdl->face_uvs[LARGE]); /* uv LARGE % LARGE */
+    assert_face_uv(0, 1, LARGE - 1, mdl->face_uvs[LARGE - 1]);
+    assert_uv((float)(LARGE - 1), 0.f, mdl->uvs[LARGE - 1]);
 }
 
 /* The same whole file loads with room for it and is refused without: first
@@ -436,7 +446,7 @@ void test_a_model_larger_than_the_arena_is_rejected(void) {
     start(4096);
     assert_rejected_cleanly(load());
 
-    start(50000);
+    start(36000);
     assert_rejected_cleanly(load());
 }
 
@@ -609,7 +619,7 @@ void test_null_arguments_are_rejected(void) {
 
 void test_a_full_model_pool_is_a_clean_failure(void) {
     write_kmf();
-    while (kek_model_create(&e, 0, 0, 0) != KEK_MODEL_HANDLE_INVALID) {
+    while (kek_model_create(&e, 0, 0, 0, 0) != KEK_MODEL_HANDLE_INVALID) {
     }
     free_models = 0;
     free_bytes = kek_arena_available(&e);

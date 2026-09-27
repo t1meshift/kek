@@ -185,8 +185,10 @@ int main(int argc, char** argv) {
         return 1;
     }
     flat_cube = KEK_CUBE_MODEL;
-    flat_cube.face_textures = 0;
-    flat_cube.textures_count = 0;
+    flat_cube.uvs = 0;
+    flat_cube.face_uvs = 0;
+    flat_cube.uvs_count = 0;
+    flat_cube.face_uvs_count = 0;
     if (dump_path) {
         dump = fopen(dump_path, "wb");
         if (!dump) {

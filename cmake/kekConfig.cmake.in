@@ -1,0 +1,8 @@
+@PACKAGE_INIT@
+
+# kek has no dependencies of its own: kekTargets.cmake is the whole package.
+# The KEK_* limits it was built with travel with kek::kek as compile
+# definitions, so a consumer sees the same sizes the library was built for.
+include("${CMAKE_CURRENT_LIST_DIR}/kekTargets.cmake")
+
+check_required_components(kek)

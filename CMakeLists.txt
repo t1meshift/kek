@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(kek VERSION 0.1.0 LANGUAGES C)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+include(GNUInstallDirs)
 
 # The library is what this project ships. The demo and the editor are projects
 # of their own that consume it the way a game would (demo/CMakeLists.txt,
@@ -36,6 +37,7 @@ endif()
 option(KEK_BUILD_TESTS "Build the engine's unit tests (tests/) and register them with CTest" ${KEK_DESKTOP_DEFAULT})
 option(KEK_BUILD_DEMO "Build the demo (demo/) against this tree's kek" ${KEK_IS_TOP_LEVEL})
 option(KEK_BUILD_EDITOR "Build the editor (tools/kek_editor/) against this tree's kek" ${KEK_DESKTOP_DEFAULT})
+option(KEK_INSTALL "Generate install rules for kek and its CMake package" ${KEK_IS_TOP_LEVEL})
 
 if(KEK_BUILD_TESTS)
   if(KEK_FETCH_DEPS)
@@ -161,8 +163,12 @@ set_target_properties(kek PROPERTIES
   C_EXTENSIONS OFF
 )
 kek_target_warnings(kek)
+# Installed under include/kek/ so the headers do not land loose in a system
+# include directory, and put on the include path from there, so a consumer
+# writes <kek.h> whichever way it got kek.
 target_include_directories(kek PUBLIC
-  kek/include/
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/kek/include>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/kek>
 )
 target_compile_definitions(kek PUBLIC
   KEK_BUFFER_WIDTH=${KEK_BUFFER_WIDTH}u
@@ -186,6 +192,44 @@ endif()
 # The name a consumer uses whichever way it got kek, add_subdirectory or
 # find_package, so demo/ and the editor are written once for both.
 add_library(kek::kek ALIAS kek)
+
+######## Install ########
+# find_package(kek) after `cmake --install`. The package is kek::kek and
+# nothing else; the KEK_* limits above are baked into it.
+if(KEK_INSTALL)
+  include(CMakePackageConfigHelpers)
+
+  install(TARGETS kek
+    EXPORT kekTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  )
+  install(DIRECTORY kek/include/
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/kek
+    FILES_MATCHING PATTERN "*.h"
+  )
+  install(EXPORT kekTargets
+    NAMESPACE kek::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/kek
+  )
+
+  configure_package_config_file(cmake/kekConfig.cmake.in
+    "${CMAKE_CURRENT_BINARY_DIR}/kekConfig.cmake"
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/kek
+  )
+  # 0.x: a minor version is allowed to break the API, so only the same one
+  # is compatible.
+  write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/kekConfigVersion.cmake"
+    COMPATIBILITY SameMinorVersion
+  )
+  install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/kekConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/kekConfigVersion.cmake"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/kek
+  )
+endif()
 
 
 ######## Tests ########

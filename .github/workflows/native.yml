@@ -1,9 +1,9 @@
 name: Native
 
-# Builds the engine, the demo, the SDL3 platform layer and the editor on the
-# toolchains people actually use, and runs the engine's unit tests. web-demo.yml
-# covers Emscripten and is deliberately separate — it publishes, this one only
-# checks.
+# Builds the engine, the demo and the editor on the toolchains people actually
+# use, runs the engine's unit tests, and builds the demo again against the
+# installed package. web-demo.yml covers Emscripten and is deliberately
+# separate — it publishes, this one only checks.
 on:
   push:
     branches: [master]
@@ -93,6 +93,21 @@ jobs:
       # stopped being built, and that should fail rather than pass quietly.
       - name: Test
         run: ctest --test-dir build --build-config Release --output-on-failure --no-tests=error
+
+      # The library as a package, the way a game consumes it: installed, then
+      # the demo configured on its own and found through find_package(kek).
+      # SDL3_DIR points at the SDL3 the tree build fetched, which leaves its
+      # package config in its build directory, so SDL3 is not built twice.
+      - name: Install
+        run: cmake --install build --config Release --prefix install
+
+      - name: Build the demo against the installed package
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          cmake -S demo -B build-demo ${{ matrix.generator }} -DCMAKE_BUILD_TYPE=Release -DKEK_WERROR=${{ matrix.werror }} -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install" -DSDL3_DIR="${{ github.workspace }}/build/_deps/sdl3-build"
+          cmake --build build-demo --config Release --parallel
 
   tidy:
     name: clang-tidy

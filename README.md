@@ -44,6 +44,27 @@ The demo resolves assets against the working directory, so run it from its outpu
 cd build/Debug && ./kek_demo_sdl
 ```
 
+### Using kek from another project
+
+Install it and find it as a package:
+
+```sh
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+cmake --install build --prefix <prefix>
+```
+
+```cmake
+find_package(kek REQUIRED)
+target_link_libraries(my_game PRIVATE kek::kek)
+```
+
+with `-DCMAKE_PREFIX_PATH=<prefix>` when configuring the consumer. `add_subdirectory` gives the same `kek::kek`. The `KEK_*` limits (framebuffer size, pool capacities) are compile-time for now and baked into the installed package. `demo/` is a complete consumer and builds that way on its own:
+
+```sh
+cmake -S demo -B build-demo -DCMAKE_PREFIX_PATH=<prefix>
+```
+
 ### Browser build
 
 The SDL3 platform layer also builds for the web through Emscripten, so the same

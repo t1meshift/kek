@@ -88,10 +88,11 @@ roughly 20 KB of actual data.
   property the loaders' LIFO error paths will rely on under marks.
 - **Normals are the largest array in the engine and nothing reads them.** `KEK_model_face_normal` is
   3 × `KEK_FVec3` = 36 bytes per face, 36,864 bytes per slot — 42% of a model — and `kek_3d_draw_model`
-  never touches them. KMF already stores them indexed (`KEK_FileModel_FaceVertex.normal`) and the loader
-  expands them. Store one normal per face, or derive them at load;
-  `kek_file_model_calculate_face_normal` already exists. UVs have the same shape: indexed on disk,
-  24 bytes per face in memory.
+  never touches them. Lighting does not read them either: it derives the face normal from the vertices at
+  draw time (`424f69e`). So the array can go outright rather than shrink, and the loader can stop
+  expanding the indexed normals KMF stores (`KEK_FileModel_FaceVertex.normal`). If Gouraud ever comes
+  (Tier 7), per-corner normals come back as a byte each, not 12. UVs have the same shape: indexed on
+  disk, 24 bytes per face in memory.
 - **Quantise vertices.** Quake's MDL format stored positions as `uint8` with a per-model scale and offset —
   four times smaller than float, and a natural step toward fixed point.
 - **Fixed point.** Go through a `kek_scalar` typedef and a small operation set, keeping the float build as
@@ -105,11 +106,11 @@ roughly 20 KB of actual data.
 
 ## Tier 3 — Engine: prerequisites for levels
 
-- **There is no lighting.** The shading palette is computed at init
-  (`kek_invalidate_shading_palette`) and face normals are loaded or generated
-  ([kek_file_model.c#L43](kek/kek_file_model.c#L43)) — and `kek_3d_draw_model` uses neither. Everything
-  renders as flat colour or unlit texture. Flat or Gouraud shading through the existing
-  `kek_palette_shade()` is the largest visual return for the least code in the whole backlog.
+- **Fog never reaches black.** The shading palette's last row is 1/`KEK_PALETTE_SHADING_LEVELS` of the
+  colour, not black, so a face past `fog_end` is dim but visible: at the default four levels, a quarter.
+  That is right for a light that only darkens, but wrong for fog into darkness. A black row after the
+  last one (or a fog colour, which costs one nearest-colour row per level) would fix it. It is a
+  palette-table change, not a rasteriser one.
 - **Nothing draws an image in 2D.** [kek_2d.h](kek/include/kek_2d.h) has primitives and 5×8 text but no way
   to put a `KEK_texture` into the framebuffer, which blocks HUD, menus, backgrounds, sprites and
   billboards. Needs `kek_2d_blit_texture()` and a transparent colour index.
@@ -137,8 +138,23 @@ rendering is a single hardcoded `kek_3d_draw_model` call.
 - An entity/instance concept in the engine: a pooled array of `{model handle, texture handle, transform,
   flags}` and a draw pass over it, following the existing `KEK_ModelPool` pattern.
 - The `.klf` format, magic `KLVL`: header, model table (paths), instance table (transform plus model
-  index), camera spawn. Same discipline as KMF — fixed-size records, bounds-checked, no allocation.
+  index), camera spawn, and the light: per-vertex shade for level geometry, a light per zone, fog. Same
+  discipline as KMF — fixed-size records, bounds-checked, no allocation.
   Specified in [docs/formats.md](docs/formats.md), which has a stub section waiting for it.
+- **Lighting a level.** The light from `424f69e` is one sun plus ambient, which suits models and
+  outdoor scenes, not rooms. Indoors:
+  - *The world gets light baked per vertex.* The exporter traces point lights and shadows offline and
+    writes one shade byte per vertex into `.klf`. At run time that is the `KEK_3D_ProjectedVertex.shade`
+    channel fog already interpolates, with the base taken from the vertex instead of from Lambert. Any
+    number of lights and shadows cost nothing at run time. The price is a byte per vertex, and large
+    walls have to be split for the gradients to show, as on the PS1.
+  - *Models take the light of their zone.* A zone or room in `.klf` carries a direction and ambient,
+    and the entity pass calls `kek_3d_set_light` before each model from the zone it stands in. Quake lit
+    alias models from the lightmap under them, to the same end.
+  - *Dynamic light later*: muzzle flashes and explosions as extra shade for vertices within a radius.
+  - *No lightmaps.* They need a surface cache, a unique UV unwrap and a level compiler, and four shading
+    levels in 256 colours would throw away most of their resolution. Light brighter than the base
+    colour is a separate question: overbright rows in the shading table, as Quake's colormap had.
 - `kek_file_level_load()`, tested through the in-memory provider from Tier 0.
 - An exporter in `scripts/`, from a level source or from the editor.
 - Collision and spatial queries — nothing makes a level walkable. AABBs and a ray cast against model
@@ -182,6 +198,10 @@ rendering is a single hardcoded `kek_3d_draw_model` call.
   with a regex, and `ENGINE_PALETTE_888` in [bmp_to_kif.py](scripts/bmp_to_kif.py). All three agree
   today — the first two were checked byte for byte when the item shrank to three channels — but nothing
   keeps them agreeing. Generate the Python copies from the C table, or the C table from a data file.
+- **Gouraud as a model option.** `424f69e` shades flat, one shade per face. That suits the look, costs one table
+  lookup per pixel and lets the normals go (Tier 2). Smooth models would want a shade per corner, and the
+  interpolation is already there for fog. The normals can come back small: Quake stored a vertex normal
+  as a byte indexing a table of 162 directions.
 - **Docs**: CONTRIBUTING.
 
 ## Done
@@ -221,6 +241,7 @@ on the hash has the reasoning, the measurements and what was verified.
 | | Was | Commit |
 | --- | --- | --- |
 | Resolution hardcoded | `KEK_BUFFER_WIDTH`/`KEK_BUFFER_HEIGHT`/`KEK_TARGET_FPS` were `#define`s at the top of `kek.c`. In `kek_config.h` with the other knobs now, with CMake cache entries | `f99074d` |
+| No lighting | The shading palette was computed at init and `kek_3d_draw_model` never used it. Flat shading from a world-fixed directional light plus ambient, with the normal derived from the face; fog with view depth; Bayer 4×4 dither between rows | `424f69e` |
 
 ### Found on the way, not from a backlog item
 

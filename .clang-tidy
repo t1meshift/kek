@@ -46,6 +46,10 @@ Checks: >
 # AllowCastToVoid below.
 
 HeaderFilterRegex: '.*/(kek|game|platform)/.*\.h$'
+# The filter matches on the absolute path, and a checkout of a repository
+# named kek is itself a /kek/ directory — on the CI runner every header under
+# build/_deps (SDL3, Unity) matched it. Fetched dependencies are never ours.
+ExcludeHeaderFilterRegex: '.*/_deps/.*'
 
 WarningsAsErrors: '*'
 

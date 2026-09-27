@@ -48,6 +48,36 @@ on a 32-bit one, plus whatever the application gives its arena. Nearly all of it
 | Palette + shading palette | 1,792 |
 | Default cube and texture, in a 1,024 reserve | 832 |
 
+Speed: 20–30 fps at 320×200 on a Pentium 100 is within reach of plain C, and the target for the pixel
+loop is ~40 cycles. Measured on 86Box with a standalone span loop (a full-screen wall, z = 1 to 6,
+64×64 texture), cycles per pixel:
+
+| Span loop | Pentium 100 | 486DX2-66 |
+| --- | --- | --- |
+| Flat fill, 16-bit depth | 11 | 19 |
+| Affine texture, u and v in 16.16, 16-bit depth | 28 | 52 |
+| Perspective every 16 pixels, 16-bit depth | 34 (+2 for 86Box's cheap `fdiv`) | 77 |
+| The same without a depth buffer | 24 | 55 |
+| The same with the 4×4 dither | 38 | 84 |
+| Every pixel rejected by the depth test | 23 | 51 |
+| The engine today (`0945961`), the same wall | ~590 | ~1,290 |
+
+A frame of that loop is ~26 ms of painted pixels on the Pentium, ~7 ms more for 1.5× overdraw that the
+depth test rejects, 2 ms of clear, 1–2 ms to copy to VGA over PCI: ~25 fps with ~5 ms left for geometry
+and the game, ~30 with no overdraw. The 486 lands at 7–10 fps, as Quake did there. The loop is an ideal
+case — long spans, one texture in cache, no triangle setup — so the real budget is a few hundred
+visible triangles, not thousands. The source is kept outside the repository for now, with the rest of
+the DOS setup (see the DOS layer item in Tier 7).
+
+- **A scanline rasteriser with a fixed-point span loop.** The ~15× between the engine and the table
+  above is three things: the bounding-box walk, which visits every pixel of a triangle's box and tests
+  coverage with six float compares (twice the pixels it paints for a typical triangle); float in the
+  pixel loop, with a store and reload per stepped value on x87 and two float-to-int conversions per
+  texel; and the per-pixel sampler call and `y * w + x` multiplies. Walking edges row by row and
+  handing each row's stretch to an integer span loop — u, v and 1/z in 16.16, 16-bit depth, a pointer
+  stepped along the row, the shading row picked once per span — removes all three. It does not wait
+  for fixed point across the engine: vertices and setup can stay float and convert once per span, which
+  is what the measured loop does. Subsumes the sampler and stepped-float items in Tier 3.
 - **UVs are the largest per-face array.** Indexed on disk, expanded in memory to a `KEK_FVec2` per
   corner: 24 bytes per face, twice the face's own indices. Indexed in memory they would be the distinct
   UVs at 8 bytes each plus three `uint16` per face. Whether that pays depends on how often real models
@@ -60,9 +90,10 @@ on a 32-bit one, plus whatever the application gives its arena. Nearly all of it
   [kek_math.c](kek/kek_math.c), the converters and the editor. On-disk formats can stay float and convert
   at load — the loader already visits every vertex.
 - **Order of work.** The arena went first, for Tier 1, and the per-pixel divides are gone (`0945961`).
-  Next move depth to `uint16`: worth doing regardless of arithmetic, and depth is three quarters of the
-  block. Then the data structures. Fixed point last — it is the most cross-cutting change and far easier
-  on top of structures that have already shrunk.
+  Next move depth to `uint16`: worth doing regardless of arithmetic, depth is three quarters of the
+  block, and the span loop wants it. Then the scanline rasteriser, which is where the speed is. Then the
+  data structures. Fixed point across the engine last — it is the most cross-cutting change, far easier
+  on top of structures that have already shrunk, and no longer on the critical path for speed.
 
 ## Tier 3 — Engine: prerequisites for levels
 
@@ -92,14 +123,15 @@ on a 32-bit one, plus whatever the application gives its arena. Nearly all of it
   without SSE3, which is every target, and a 486's `FIST` is around 30 cycles on top. On an emulated
   486DX2-66 the benchmark's textured quad is ~1,300 cycles per painted pixel against ~460 for the flat
   one. Quake stepped s and t in 16.16 fixed point along the span and masked for wrap; the span loop
-  already has u and v stepping linearly, so it is the same shape. Overlaps with fixed point in Tier 2,
-  and could go first as a local change inside the span.
+  already has u and v stepping linearly, so it is the same shape. Goes away with the scanline
+  rasteriser in Tier 2, or could go first as a local change inside the span.
 - **Every stepped float goes through memory on x87.** The library builds as strict C99, which on x87
   makes GCC round each `float` assignment by storing and reloading it (`-fexcess-precision=standard`),
   so `w0 += step` in the pixel loop is an `fadd`, an `fstp` and an `fld`. `-fexcess-precision=fast`
   took 20% off the flat quad and 10% off the textured one on the emulated 486. Not worth taking as a
   flag: results would then depend on which values the compiler keeps in 80-bit registers, and the
-  frames already changed with it, which is the opposite of golden frames. Fixed point makes it moot.
+  frames already changed with it, which is the opposite of golden frames. An integer span loop (the
+  scanline rasteriser in Tier 2) makes it moot where it matters.
 - **The depth buffer is the single largest allocation.** 320×200×4 = 250 KB against 62.5 KB for the frame
   itself. Quantised `1/z` in `uint16` halves it and cuts memory traffic in the hot loop. Quake used a
   16-bit z-buffer at this resolution, and only for alias models.

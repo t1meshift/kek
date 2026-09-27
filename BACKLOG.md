@@ -76,6 +76,33 @@ case — long spans, one texture in cache, no triangle setup — so the real bud
 visible triangles, not thousands. The source is kept outside the repository for now; the DOS build
 itself that runs it is `cba7a07`, in [Done](#done).
 
+The demo's own frame, measured: the bench draws its cat and overlay (`cc11002`, `--assets demo/assets`)
+and the demo shows its frame rate (`ffdbd4a`). On the emulated Pentium 100, default view, not paced
+(`KEK_TARGET_FPS=1000`), it runs at 39.8 fps, ~25 ms a frame:
+
+| | ms |
+| --- | --- |
+| The cat, as the bench draws it | ~22 |
+| Its vertices and faces alone, drawn behind the camera | ~3.6 |
+| Its pixels, ~6,700 through the loop for 4,900 painted, at the loop's ~40 cycles | ~2.5 |
+| Copying the frame to VGA, S3 Trio64 on PCI | 2.4 |
+| The clear | 1.9 |
+| The 2D overlay | ~0.5 |
+
+The parts come to ~27 ms against the demo's ~25: the bench turns its cat by frame, the demo by time,
+so they do not draw quite the same views. The copy was 62 ms with the VM's first card, an IBM VGA on 8-bit ISA; a VLB Trio64 on the 486 is 2.4
+too. With the camera moved up so that the cat fills most of the frame, the paced build reads 20 fps.
+
+- **Small triangles cost their rows, not their pixels.** Counted, the cat is 168 triangles in 1,614
+  rows of about four pixels, nearly all one span, and a row costs ~850 cycles on the Pentium: the
+  perspective divide at each end of the span, the planes evaluated where it starts, the conversions
+  and compares around them, for four pixels of ~40. Quake drew its models affine, with every
+  attribute stepped down the edges in fixed point and no float or divide in a row at all
+  (`d_polyse.c`), because on a model's small triangles the perspective error does not show. The same
+  here, chosen per triangle — where 1/z changes little across it, or it is a few pixels tall — would
+  take a row to ~100–150 cycles, and the cat from ~22 ms to ~8–10 by estimate. Large or deep
+  triangles, walls and floors, keep the perspective path. Next in line.
+
 Geometry is small beside that, and float suits it. A second standalone loop — rotate, translate and
 project a vertex; set up a triangle's area and three attribute gradients — in cycles:
 
@@ -110,10 +137,11 @@ separates them, at ~8 seconds a frame in float, and it is not a target (see Sett
     `lrintf` is a libm call slower than the cast; and it rounds vertices to the nearest pixel, which
     moves edges. The double-mantissa rounding the span ends use would do the same without a flag.
 - **Order of work.** Done: the arena for Tier 1, the per-pixel divides (`0945961`), 16-bit depth
-  (`6da6808`), the scanline rasteriser (`035fd37`) and the models' storage (`fb92a44`). What is left
-  of the span is the rest of the speed budget: a full-screen textured wall is 33 ms on the Pentium,
-  ~30 fps before geometry, overdraw and the game, where the table's loop would be ~26 ms. Fixed point
-  across the engine is no longer on the list (see Settled decisions).
+  (`6da6808`), the scanline rasteriser (`035fd37`), the models' storage (`fb92a44`) and the per-face
+  and per-triangle waste (`5269d9e`). Next the affine path for small triangles, which is where the
+  demo's frame goes. What is left of the span matters for large surfaces: a full-screen textured wall
+  is 33 ms on the Pentium, where the table's loop would be ~26 ms. Fixed point across the engine is no
+  longer on the list (see Settled decisions).
 
 ## Tier 3 — Engine: prerequisites for levels
 
@@ -258,6 +286,10 @@ and camera coordinates ([demo_scene_entry.c](demo/demo_scene_entry.c)).
   `memcpy`/`memset`/`memmove`/`memcmp` even under `-ffreestanding`, so "no libc" means those four come
   from the platform or from kek. A CI build of the library with `-ffreestanding -nostdlib` would keep it
   honest either way.
+- **The DJGPP toolchain file needs the compiler's directory on `PATH`.** `cmake/toolchain-djgpp.cmake`
+  names the compiler by its full path, but the gcc driver runs `stubify` to finish a DOS executable
+  and looks for it on `PATH`; without `KEK_DJGPP_ROOT/bin` there, configuring fails at CMake's compiler
+  check. The toolchain file could prepend the directory to `PATH` for the build.
 - **Docs**: CONTRIBUTING.
 
 ## Done
@@ -313,6 +345,7 @@ on the hash has the reasoning, the measurements and what was verified.
 | Normals nobody read | `KEK_model_face_normal` was 36 bytes per face, 432 of the default cube's 1,264, and neither drawing nor lighting read it. Gone from the model; the KMF loader checks normal indices and reads past the normals without staging them. The builtin reserve went from 2,048 to 1,024 with it | `01673ea` |
 | Bounding-box rasterisers | Both walked every pixel of a triangle's box with float edge functions, stepped float attributes through memory on x87 and sampled through a call per pixel: ~15× the standalone span loop. Edges walked row by row in exact integers, a span loop in 16.15 depth and 16.16 texels with masked wrap, perspective every 16 pixels. The benchmark's textured wall from ~1,290 cycles a pixel to ~130 on the 486, ~590 to ~57 on the Pentium; coverage the same, pixel for pixel | `035fd37` |
 | UVs the largest per-face array | UVs expanded to a float pair per corner of every face, 24 bytes a face, vertices a float triple, faces three `uint32_t`. UVs indexed as the file has them, vertices a byte an axis with a per-model scale and offset as in Quake's MDL, 16-bit indices: the demo's cat from 26,304 bytes to 11,776. Vertices move by up to half a step as a model turns, which is accepted | `fb92a44` |
+| Per-face and per-triangle waste | Back faces were lit, square root and all, clipped and projected before a screen-space test dropped them; every face projected its three corners though a vertex is shared by about six; an edge's setup was 64-bit divides, eight calls into libgcc a triangle; a row took two evaluations of each plane and a divide for its depth. Back faces dropped in view space first, each vertex projected once, 32-bit edge steps, a row's depth and shade stepped by the triangle's gradient. The demo's cat from 32.5 ms to ~22 on the Pentium | `5269d9e` |
 
 ### Tier 3
 

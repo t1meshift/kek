@@ -73,8 +73,8 @@ A frame of that loop is ~26 ms of painted pixels on the Pentium, ~7 ms more for 
 depth test rejects, 2 ms of clear, 1–2 ms to copy to VGA over PCI: ~25 fps with ~5 ms left for geometry
 and the game, ~30 with no overdraw. The 486 lands at 7–10 fps, as Quake did there. The loop is an ideal
 case — long spans, one texture in cache, no triangle setup — so the real budget is a few hundred
-visible triangles, not thousands. The source is kept outside the repository for now, with the rest of
-the DOS setup (see the DOS layer item in Tier 7).
+visible triangles, not thousands. The source is kept outside the repository for now; the DOS build
+itself that runs it is `cba7a07`, in [Done](#done).
 
 Geometry is small beside that, and float suits it. A second standalone loop — rotate, translate and
 project a vertex; set up a triangle's area and three attribute gradients — in cycles:
@@ -242,16 +242,6 @@ and camera coordinates ([demo_scene_entry.c](demo/demo_scene_entry.c)).
 - **No audio at all**; `SDL_AUDIO` is explicitly disabled in the web build
   ([CMakeLists.txt](CMakeLists.txt)). Own format by analogy with KMF/KIF, most likely sound banks — a set
   of short samples in one file behind a shared table, to save space.
-- **A DOS platform layer for the demo**, next to its SDL3 one. The target is named and the frame format already suits it: VGA mode 13h is
-  exactly 320×200 at 256 colours, so presenting is a copy to `0xA0000`, and the 0–63 channel range of
-  `KEK_palette_item` is the VGA DAC range (ports `0x3C8`/`0x3C9`), and 256 of them are the 768-byte block
-  the DAC takes. Build with DJGPP, from a build file of its own for the library: the CMake package does
-  not reach there. The official cross compiler (delorie.com's `djcross-gcc` RPMs, GCC 14.2) builds the
-  library and `bench/` for DOS unchanged, and 86Box runs them from a FreeDOS boot floppy. Two things
-  learnt measuring there: a fresh `ami471` CMOS has both caches off, which made the 486 three times
-  slower than the manual until setup's BIOS defaults were loaded, and 86Box's Pentium needs the dynamic
-  recompiler for Pentium timings but then prices a dependent `fdiv` at ~4 cycles instead of 39, so it
-  undersells anything about divides; the 486 matches the manual (`fdiv` 77 against 73).
 - **Scripts**: no `requirements.txt` (Pillow is needed), no round-trip tests for `obj_to_kmf` or
   `bmp_to_kif`. The default palette has three copies: the engine's table in
   [kek_palette.c](kek/kek_palette.c), a string in [palette_to_bmp.py](scripts/palette_to_bmp.py) parsed
@@ -334,6 +324,12 @@ on the hash has the reasoning, the measurements and what was verified.
 | Depth buffer the largest allocation | A `float` per pixel, 256,000 of a 320×200 block's 329,487 bytes. 1/z in a `uint16_t`, scaled so 65535 is the default near plane, saturating at both ends; the block is 201,487 | `6da6808` |
 | The sampler per textured pixel | `kek_texture_sample` was a call per pixel with a branch on the warp mode, `floorf` twice under `REPEAT` and two conversions. The span loop steps u and v in 16.16 and masks for wrap; only textures whose sides are not powers of two still go through it | `035fd37` |
 | Stepped floats through memory on x87 | Strict C99 stored and reloaded every `float` the pixel loops stepped. Nothing in the span loops is float now | `035fd37` |
+
+### Tier 7
+
+| | Was | Commit |
+| --- | --- | --- |
+| No DOS platform layer | Only SDL3 (`demo/platform/main_sdl.c`); the frame was mode-13h-shaped from the start but nothing ran it there. `demo/platform/dos/`: mode 13h via a real-mode `int 0x10` and DJGPP's near-pointer window, the palette straight to ports `0x3C8`/`0x3C9` with no widening, an IRQ9 handler for real held/pressed/released keys, `uclock()` for frame pacing. `cmake/toolchain-djgpp.cmake` reaches the existing CMake tree with the installed cross compiler rather than a build file of its own — `kek`, `tests/` and `bench/` had no OS dependency and cross-build unchanged. Verified in 86Box's 486DX2-66 VM from a FreeDOS floppy: the cat renders, rotates and moves with the keyboard | `cba7a07` |
 
 ### Found on the way, not from a backlog item
 

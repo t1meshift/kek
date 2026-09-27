@@ -257,28 +257,71 @@ void test_rows_cover_exactly_the_pixels_of_the_closed_triangle(void) {
     kek_test_frame_assert_guards();
 }
 
-/* A side that is not a power of two leaves the span loop's masks out, and the
-   texture goes through the sampler per pixel instead. Still every pixel, in
-   both wrap modes, and nothing outside the frame. */
+/* A side that is not a power of two leaves the span loop's masks out, and so
+   do more than 65,536 texels; either way the texture goes through the sampler
+   per pixel instead. Still every pixel, in both wrap modes, and nothing
+   outside the frame. */
 void test_a_texture_of_any_size_fills_the_frame_in_both_wrap_modes(void) {
-    KEK_TextureHandle handle = kek_texture_create(&e, 3, 5);
-    KEK_texture* texture = kek_texture_get(&e, handle);
+    static const uint16_t sizes[2][2] = { { 3, 5 }, { 512, 256 } };
     int w = e.w, h = e.h;
     KEK_3D_ProjectedVertex v[3];
+    size_t i;
     int mode;
 
-    TEST_ASSERT_NOT_NULL(texture);
-    memset(texture->data, 9, (size_t)3 * 5);
-    for (mode = 0; mode < 2; ++mode) {
-        kek_texture_set_warp_mode(&e, mode ? KEK_TEXTURE_WARP_REPEAT : KEK_TEXTURE_WARP_CLAMP);
-        kek_test_frame_clear(&e);
-        v[0] = vertex(-10 * w, -10 * h, 3.f);
-        v[1] = vertex(10 * w, -10 * h, 3.f);
-        v[2] = vertex(w / 2, 10 * h, 3.f);
-        kek_3d_triangle_textured(&e, v, texture);
-        TEST_ASSERT_EQUAL_INT(w * h, kek_test_frame_count(&e, 9));
-        kek_test_frame_assert_guards();
+    for (i = 0; i < 2; ++i) {
+        KEK_TextureHandle handle = kek_texture_create(&e, sizes[i][0], sizes[i][1]);
+        KEK_texture* texture = kek_texture_get(&e, handle);
+
+        TEST_ASSERT_NOT_NULL(texture);
+        memset(texture->data, 9, (size_t)sizes[i][0] * sizes[i][1]);
+        for (mode = 0; mode < 2; ++mode) {
+            kek_texture_set_warp_mode(&e, mode ? KEK_TEXTURE_WARP_REPEAT : KEK_TEXTURE_WARP_CLAMP);
+            kek_test_frame_clear(&e);
+            v[0] = vertex(-10 * w, -10 * h, 3.f);
+            v[1] = vertex(10 * w, -10 * h, 3.f);
+            v[2] = vertex(w / 2, 10 * h, 3.f);
+            kek_3d_triangle_textured(&e, v, texture);
+            TEST_ASSERT_EQUAL_INT(w * h, kek_test_frame_count(&e, 9));
+            kek_test_frame_assert_guards();
+        }
+        kek_texture_destroy(&e, handle);
     }
+    kek_texture_set_warp_mode(&e, KEK_TEXTURE_WARP_CLAMP);
+}
+
+/* The masked path wraps under REPEAT as the sampler does: a 256x256 texture,
+   the most the masks take, drawn across many repeats with a different index
+   in every texel, comes out the same pixel for pixel whichever whole number
+   of repeats the UVs are shifted by. */
+void test_repeat_wraps_the_same_whatever_repeat_it_starts_in(void) {
+    static uint8_t first[KEK_TEST_WIDTH * KEK_TEST_HEIGHT];
+    KEK_TextureHandle handle = kek_texture_create(&e, 256, 256);
+    KEK_texture* texture = kek_texture_get(&e, handle);
+    const float shifts[3] = { 0.f, 3.f, -7.f };
+    KEK_3D_ProjectedVertex v[3];
+    size_t i, k;
+
+    TEST_ASSERT_NOT_NULL(texture);
+    for (i = 0; i < (size_t)256 * 256; ++i) {
+        texture->data[i] = (uint8_t)(1 + (i * 7 + (i >> 8) * 13) % 255);
+    }
+    kek_texture_set_warp_mode(&e, KEK_TEXTURE_WARP_REPEAT);
+    for (k = 0; k < 3; ++k) {
+        kek_test_frame_clear(&e);
+        for (i = 0; i < 3; ++i) {
+            v[i] = vertex(i == 1 ? 310 : 5, i == 2 ? 195 : 5, 2.f);
+            v[i].u_over_z = ((float)(i == 1) * 2.25f + shifts[k]) * v[i].inv_z;
+            v[i].v_over_z = ((float)(i == 2) * 1.75f - shifts[k]) * v[i].inv_z;
+        }
+        kek_3d_triangle_textured(&e, v, texture);
+        if (k == 0) {
+            memcpy(first, e.fb, sizeof(first));
+            TEST_ASSERT_GREATER_THAN_INT(0, kek_test_frame_painted(&e));
+        } else {
+            TEST_ASSERT_EQUAL_UINT8_ARRAY(first, e.fb, sizeof(first));
+        }
+    }
+    kek_test_frame_assert_guards();
     kek_texture_set_warp_mode(&e, KEK_TEXTURE_WARP_CLAMP);
     kek_texture_destroy(&e, handle);
 }
@@ -622,6 +665,7 @@ int main(void) {
     RUN_TEST(test_a_textured_triangle_larger_than_the_frame_fills_it_in_both_wrap_modes);
     RUN_TEST(test_rows_cover_exactly_the_pixels_of_the_closed_triangle);
     RUN_TEST(test_a_texture_of_any_size_fills_the_frame_in_both_wrap_modes);
+    RUN_TEST(test_repeat_wraps_the_same_whatever_repeat_it_starts_in);
     RUN_TEST(test_uvs_past_the_texture_sample_its_edge_under_clamp);
     RUN_TEST(test_a_cube_in_front_of_the_camera_draws);
     RUN_TEST(test_a_cube_behind_the_camera_or_past_the_far_plane_draws_nothing);

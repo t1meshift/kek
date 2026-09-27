@@ -486,15 +486,20 @@ typedef struct KEK_3D_Textured_ {
     int shade_fixed;
     int shade_uniform;
     const KEK_texture* texture;
-    float width, height;
     int repeat;
-    /* Both sides a power of two, which is every texture in practice: a texel
-       is two shifts, two masks and an or. Any other size goes through
-       kek_texture_sample per pixel, as everything did before, and is several
-       times slower for it. */
+    /* Both sides a power of two and no more than 65,536 texels, which is
+       every texture in practice. The loop steps u in texels and v in texels
+       times the width, both in 16.16, so a texel is two constant shifts, two
+       masks and an or. Any other texture goes through kek_texture_sample per
+       pixel, as everything did before, and is several times slower for it. */
     int masked;
-    int v_shift;
     uint32_t u_mask, v_mask;
+    /* From UV to what the loop steps: the width, and the height times the
+       width. */
+    float u_scale, v_scale;
+    /* The most either may be under CLAMP: half a texel short of the far edge,
+       which still samples the last texel. */
+    int64_t u_most, v_most;
     /* How far 1/z, u/z and v/z move across a full span. */
     float span_inv_z, span_u_over_z, span_v_over_z;
 } KEK_3D_Textured_;
@@ -526,68 +531,55 @@ static void kek_3d_perspective(const KEK_3D_Perspective_* p, float* out_u, float
     *out_v = p->v_over_z * z;
 }
 
-/* A coordinate in texels as the span loop steps it: 16.16, which the loop
-   carries in a uint32_t.
+/* value * 65536, rounded to nearest. The double's mantissa does the
+   rounding: adding 1.5 * 2^52 fixes the exponent so that a unit lands in the
+   lowest bit, and the integer is read straight out of the bits. That is no
+   float-to-int conversion, which on x87 is an fldcw pair around fistp, and
+   no range to check first: past 2^35 the result means nothing, but it is
+   defined, and the mask keeps a NaN's sign out of it. Sound wherever double
+   is IEEE-754 binary64 and an assignment rounds to it, which C99 requires of
+   x87 too. */
+KEK_STATIC_ASSERT_DECL(kek_3d_double_is_64_bits, sizeof(double) == 8);
 
-   Under REPEAT the loop's mask takes it modulo the side, and a power of two
-   up to 32768 divides 2^32 of these, so wrapping the integer wraps the
-   texture: it only has to start somewhere the conversion is defined. Past
-   ±32,768 texels it is folded into the texture first, and *out_folded says
-   so. Under CLAMP it is held inside, half a texel short of the far edge,
-   which still samples the last texel; then everything between two ends is
-   inside too. Quake clamped s and t at the ends of its spans the same way. */
-static int32_t kek_3d_texel_fixed(float t, float size, int repeat, int* out_folded) {
-    if (repeat) {
-        if (!(t > -32768.f && t < 32768.f)) {
-            *out_folded = 1;
-            t -= floorf(t / size) * size;
-            /* NaN, and infinity, which the line above makes NaN. */
-            if (!(t >= 0.f && t < 32768.f)) {
-                return 0;
-            }
-        }
-        return (int32_t)(t * 65536.f);
-    }
-    if (!(t >= 0.f)) {
-        return 0;
-    }
-    if (t > size - 0.5f) {
-        t = size - 0.5f;
-    }
-    return (int32_t)(t * 65536.f);
+static int64_t kek_3d_fixed16(float value) {
+    double rounded = (double)value * 65536.0 + 6755399441055744.0;
+    uint64_t bits;
+
+    memcpy(&bits, &rounded, sizeof(bits));
+    return (int64_t)(bits & 0x7FFFFFFFFFFFFFFFULL) - (int64_t)0x4338000000000000LL;
 }
 
-/* The step between two span ends: the difference of the ends as converted,
-   divided, which for a full span is a shift. Rounded toward the first end,
-   so under CLAMP the last pixel stays inside the texture. An end folded
-   under REPEAT has lost its distance from the other, and the step comes from
-   the coordinates as they were, in UV units, instead. Either way bounded at
-   16,384 texels a span, past which a texture is noise whatever is sampled. */
+/* A span end as the loop steps it. Under REPEAT as it is: the loop carries
+   it in a uint32_t, and the mask takes that modulo the side, which divides
+   2^32. Under CLAMP held inside the texture, so everything between two ends
+   is inside too; Quake clamped s and t at the ends of its spans the same
+   way. */
+static int64_t kek_3d_texel_end(float uv, float scale, int64_t most, int repeat) {
+    int64_t t = kek_3d_fixed16(uv * scale);
+
+    if (!repeat) {
+        t = t < 0 ? 0 : t > most ? most : t;
+    }
+    return t;
+}
+
+/* The step between two span ends, rounded toward the first so that under
+   CLAMP the last pixel stays inside the texture, and a shift for a full
+   span. The ends are as they are, not as they wrap; the difference is
+   bounded at 16,384 texels a span, past which a texture is noise whatever
+   is sampled. Two results of kek_3d_fixed16 are never far enough apart to
+   overflow their difference. */
 #define KEK_3D_TEXEL_STEP_BOUND 1073741824
 
-static uint32_t kek_3d_texel_step(int32_t from, int32_t to, float from_uv, float to_uv, float size,
-                                  int folded, int steps) {
-    int32_t d;
+static uint32_t kek_3d_texel_step(int64_t from, int64_t to, int steps) {
+    int64_t d = to - from;
+    int32_t bounded = d > KEK_3D_TEXEL_STEP_BOUND ? KEK_3D_TEXEL_STEP_BOUND
+                    : d < -KEK_3D_TEXEL_STEP_BOUND ? -KEK_3D_TEXEL_STEP_BOUND : (int32_t)d;
 
     if (steps <= 0) {
         return 0;
     }
-    if (folded) {
-        float f = (to_uv - from_uv) * size * 65536.f;
-        if (f != f) {
-            f = 0.f;
-        } else if (f > (float)KEK_3D_TEXEL_STEP_BOUND) {
-            f = (float)KEK_3D_TEXEL_STEP_BOUND;
-        } else if (f < -(float)KEK_3D_TEXEL_STEP_BOUND) {
-            f = -(float)KEK_3D_TEXEL_STEP_BOUND;
-        }
-        d = (int32_t)f;
-    } else {
-        int64_t wide = (int64_t)to - from;
-        d = wide > KEK_3D_TEXEL_STEP_BOUND ? KEK_3D_TEXEL_STEP_BOUND
-          : wide < -KEK_3D_TEXEL_STEP_BOUND ? -KEK_3D_TEXEL_STEP_BOUND : (int32_t)wide;
-    }
-    return (uint32_t)(steps == KEK_3D_SPAN ? d / KEK_3D_SPAN : d / steps);
+    return (uint32_t)(steps == KEK_3D_SPAN ? bounded / KEK_3D_SPAN : bounded / steps);
 }
 
 /* What a row carries from one span of KEK_3D_SPAN pixels to the next: depth
@@ -625,6 +617,55 @@ static void kek_3d_textured_pixels_sampled(KEK_engine* engine, const KEK_3D_Text
     }
 }
 
+/* The pixels [x, end) of one span with a uniform shade: the loop the rest is
+   there to feed. Everything arrives as a plain value rather than through the
+   triangle's struct, since a store through a uint8_t* may alias anything the
+   compiler cannot see is local, and it would reload each of them after every
+   pixel. Returns the depth where the span ended. */
+static uint32_t kek_3d_texels(uint16_t* db, uint8_t* fb, int x, int end, const uint8_t* const rows[4],
+                              const uint8_t* pixels, uint32_t u_mask, uint32_t v_mask,
+                              uint32_t z, uint32_t dz, uint32_t tu, uint32_t du, uint32_t tv, uint32_t dv) {
+    for (; x < end; ++x) {
+        uint16_t depth = (uint16_t)(z >> 15);
+        if (depth > db[x]) {
+            db[x] = depth;
+            fb[x] = rows[x & 3][pixels[((tv >> 16) & v_mask) | ((tu >> 16) & u_mask)]];
+        }
+        z += dz;
+        tu += du;
+        tv += dv;
+    }
+    return z;
+}
+
+/* The same with a shade stepped across the span: each pixel's shade is
+   clamped to the table and dithered as kek_3d_shade_row_stepped does it,
+   with the row of thresholds for this y picked once. The shade where the
+   span ended goes back through *s. */
+static uint32_t kek_3d_texels_shaded(uint16_t* db, uint8_t* fb, int x, int end, const uint8_t* shading,
+                                     const uint8_t bayer[4], const uint8_t* pixels, uint32_t u_mask, uint32_t v_mask,
+                                     uint32_t z, uint32_t dz, int32_t* s, int32_t ds,
+                                     uint32_t tu, uint32_t du, uint32_t tv, uint32_t dv) {
+    const int32_t most = (int32_t)KEK_3D_SHADE_MAX << KEK_3D_SHADE_FRACTION_BITS;
+    int32_t shade = *s;
+
+    for (; x < end; ++x) {
+        uint16_t depth = (uint16_t)(z >> 15);
+        if (depth > db[x]) {
+            uint32_t fixed = (uint32_t)(shade < 0 ? 0 : shade > most ? most : shade) >> KEK_3D_SHADE_FRACTION_BITS;
+            uint32_t level = fixed / KEK_3D_SHADE_ONE + (fixed % KEK_3D_SHADE_ONE > bayer[x & 3]);
+            db[x] = depth;
+            fb[x] = shading[((size_t)level << 8) + pixels[((tv >> 16) & v_mask) | ((tu >> 16) & u_mask)]];
+        }
+        z += dz;
+        shade += ds;
+        tu += du;
+        tv += dv;
+    }
+    *s = shade;
+    return z;
+}
+
 static void kek_3d_textured_span(KEK_engine* engine, const void* context, int y, int first, int last) {
     const KEK_3D_Textured_* t = (const KEK_3D_Textured_*)context;
     const uint8_t* pixels = t->texture->data;
@@ -635,8 +676,7 @@ static void kek_3d_textured_span(KEK_engine* engine, const void* context, int y,
     KEK_3D_Perspective_ p;
     int32_t z_first;
     float u, v;
-    int32_t tu_next = 0, tv_next = 0;
-    int u_folded_next = 0, v_folded_next = 0;
+    int64_t tu_next = 0, tv_next = 0;
     int n = last - first;
     int x = first;
 
@@ -662,17 +702,15 @@ static void kek_3d_textured_span(KEK_engine* engine, const void* context, int y,
     kek_3d_perspective(&p, &u, &v);
     /* Each span's end, converted, is where the next one starts. */
     if (t->masked) {
-        tu_next = kek_3d_texel_fixed(u * t->width, t->width, t->repeat, &u_folded_next);
-        tv_next = kek_3d_texel_fixed(v * t->height, t->height, t->repeat, &v_folded_next);
+        tu_next = kek_3d_texel_end(u, t->u_scale, t->u_most, t->repeat);
+        tv_next = kek_3d_texel_end(v, t->v_scale, t->v_most, t->repeat);
     }
     while (x <= last) {
         int count = last - x + 1;
-        int steps;
+        int steps, end;
         float u_end, v_end;
-        int32_t tu_first, tv_first;
-        int u_folded, v_folded;
+        int64_t tu_first, tv_first;
         uint32_t tu, tv, du, dv;
-        int i;
 
         /* A full span ends on the first pixel of the next, which is where
            that one starts; the last ends on the row's last pixel. */
@@ -701,42 +739,23 @@ static void kek_3d_textured_span(KEK_engine* engine, const void* context, int y,
 
         tu_first = tu_next;
         tv_first = tv_next;
-        u_folded = u_folded_next;
-        v_folded = v_folded_next;
-        u_folded_next = 0;
-        v_folded_next = 0;
-        tu_next = kek_3d_texel_fixed(u_end * t->width, t->width, t->repeat, &u_folded_next);
-        tv_next = kek_3d_texel_fixed(v_end * t->height, t->height, t->repeat, &v_folded_next);
-        du = kek_3d_texel_step(tu_first, tu_next, u, u_end, t->width, u_folded | u_folded_next, steps);
-        dv = kek_3d_texel_step(tv_first, tv_next, v, v_end, t->height, v_folded | v_folded_next, steps);
-        /* Unsigned from here: under REPEAT the loop's adds wrap. */
-        tu = (uint32_t)tu_first;
-        tv = (uint32_t)tv_first;
+        tu_next = kek_3d_texel_end(u_end, t->u_scale, t->u_most, t->repeat);
+        tv_next = kek_3d_texel_end(v_end, t->v_scale, t->v_most, t->repeat);
+        du = kek_3d_texel_step(tu_first, tu_next, steps);
+        dv = kek_3d_texel_step(tv_first, tv_next, steps);
+        /* Unsigned from here, taking the low 32 bits: under REPEAT the
+           loop's adds wrap, and so does the texture. */
+        tu = (uint32_t)(uint64_t)tu_first;
+        tv = (uint32_t)(uint64_t)tv_first;
 
+        end = x + count;
         if (t->shade_uniform) {
-            for (i = 0; i < count; ++i, ++x) {
-                uint16_t depth = (uint16_t)(st.z >> 15);
-                if (depth > db[x]) {
-                    db[x] = depth;
-                    fb[x] = rows[x & 3][pixels[((tv >> t->v_shift) & t->v_mask) | ((tu >> 16) & t->u_mask)]];
-                }
-                st.z += st.dz;
-                tu += du;
-                tv += dv;
-            }
+            st.z = kek_3d_texels(db, fb, x, end, rows, pixels, t->u_mask, t->v_mask, st.z, st.dz, tu, du, tv, dv);
+            x = end;
         } else {
-            for (i = 0; i < count; ++i, ++x) {
-                uint16_t depth = (uint16_t)(st.z >> 15);
-                if (depth > db[x]) {
-                    uint8_t texel = pixels[((tv >> t->v_shift) & t->v_mask) | ((tu >> 16) & t->u_mask)];
-                    db[x] = depth;
-                    fb[x] = kek_3d_shade_row_stepped(engine, st.s, x, y)[texel];
-                }
-                st.z += st.dz;
-                st.s += st.ds;
-                tu += du;
-                tv += dv;
-            }
+            st.z = kek_3d_texels_shaded(db, fb, x, end, engine->shading_palette, KEK_3D_BAYER4[y & 3], pixels,
+                                        t->u_mask, t->v_mask, st.z, st.dz, &st.s, st.ds, tu, du, tv, dv);
+            x = end;
         }
         /* Exact again for the next span rather than carrying the drift. */
         u = u_end;
@@ -758,13 +777,16 @@ void kek_3d_triangle_textured(KEK_engine* engine, KEK_3D_ProjectedVertex vertice
     t.shade = kek_3d_plane(&t.setup, vertices[0].shade, vertices[1].shade, vertices[2].shade);
     t.shade_uniform = kek_3d_shade_uniform(vertices, &t.shade_fixed);
     t.texture = texture;
-    t.width = (float)texture->width;
-    t.height = (float)texture->height;
     t.repeat = engine->texture_warp_mode == KEK_TEXTURE_WARP_REPEAT;
-    t.masked = log2_w >= 0 && log2_h >= 0;
-    t.v_shift = t.masked ? 16 - log2_w : 0;
+    /* Under REPEAT v times the width wraps at 2^32 as the texture does only
+       while width * height divides 65536. */
+    t.masked = log2_w >= 0 && log2_h >= 0 && log2_w + log2_h <= 16;
     t.u_mask = (uint32_t)texture->width - 1u;
-    t.v_mask = t.masked ? ((uint32_t)texture->height - 1u) << log2_w : 0u;
+    t.v_mask = ((uint32_t)texture->height - 1u) * (uint32_t)texture->width;
+    t.u_scale = (float)texture->width;
+    t.v_scale = (float)texture->height * (float)texture->width;
+    t.u_most = (int64_t)texture->width * 65536 - 32768;
+    t.v_most = ((int64_t)texture->height * 65536 - 32768) * (int64_t)texture->width;
     t.span_inv_z = t.inv_z.dx * (float)KEK_3D_SPAN;
     t.span_u_over_z = t.u_over_z.dx * (float)KEK_3D_SPAN;
     t.span_v_over_z = t.v_over_z.dx * (float)KEK_3D_SPAN;

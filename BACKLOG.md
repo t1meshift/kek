@@ -132,6 +132,12 @@ separates them, at ~8 seconds a frame in float, and it is not a target (see Sett
   billboards. Needs `kek_2d_blit_texture()` and a transparent colour index.
 - **No scale, no transform type.** `kek_3d_draw_model(e, mdl, camera, pos, rotation)`
   ([kek_3d.h](kek/include/kek_3d.h)) — required before anything can be placed in a world.
+- **The camera is set up again for every model.** `kek_3d_draw_model` builds the camera's matrix
+  (6 `sinf`/`cosf`) and its focal length (`tanf`) on every call, though they change once a frame. With
+  DJGPP's libm, which is fdlibm in software, that is ~1,100 cycles a model on a Pentium 100 and ~3,500
+  on a 486DX2-66, measured on 86Box. A view set once — `kek_3d_begin_view(e, camera)` or the camera
+  cached in the engine — takes it off the per-model path. It changes the same signature as the
+  transform item above, so the two go together.
 - **The sampler is what a textured pixel costs now.** With the divides gone (`0945961`),
   `kek_texture_sample` is a call into another file per pixel, a branch on the warp mode, `floorf` twice
   under `REPEAT`, a clamp and two float-to-int conversions — each of those an `fldcw` pair on an x87
@@ -150,10 +156,33 @@ separates them, at ~8 seconds a frame in float, and it is not a target (see Sett
 - **The depth buffer is the single largest allocation.** 320×200×4 = 250 KB against 62.5 KB for the frame
   itself. Quantised `1/z` in `uint16` halves it and cuts memory traffic in the hot loop. Quake used a
   16-bit z-buffer at this resolution, and only for alias models.
-- **Own transcendentals.** 28 libm calls across four files: `sinf`/`cosf` (15), `roundf` (5), `tanf` (2),
-  `sqrtf`, `floorf`, `fabsf`. Table-driven replacements drop the libm dependency and, more importantly,
-  make rendering bit-reproducible across toolchains — libm accuracy is not specified, unlike `+ - * /`
-  and `sqrt`. Together with `-ffp-contract=off` and no fast-math this puts golden-frame tests back on the
+- **Own transcendentals.** libm calls across four files: `sinf`/`cosf` (18), `roundf` (4), `tanf` (2),
+  `sqrtf` (2), `floorf`, `fabsf` (2). Table-driven replacements drop the libm dependency and, more
+  importantly, make rendering bit-reproducible across toolchains — libm accuracy is not specified, unlike
+  `+ - * /` and `sqrt`. What they cost with DJGPP's libm, which is fdlibm and never uses the x87's own
+  instructions, in cycles per call on 86Box:
+
+  | | Pentium 100 | 486DX2-66 |
+  | --- | --- | --- |
+  | `sinf`, `cosf` | 145 | 450–465 |
+  | `tanf` | 232 | 767 |
+  | `sqrtf` | 282 | 547 |
+  | `floorf` | 26 | 32 |
+  | `roundf` | 34 | 88 |
+  | `lrintf` | 65 | 147 |
+  | `(int)` cast | 26 | 58 |
+
+  Per frame that is small next to the pixels: trigonometry is per model (and mostly the camera's,
+  above), `sqrtf` per face in the light, ~1 ms and ~2.5 ms for 300 faces. The exception is `floorf`
+  twice per texel under `REPEAT`, ~33 ms of a full-screen wall on the Pentium, which the scanline
+  rasteriser's masked wrap removes. `sqrtf` has a cheap fix: `sqrtf` stays a library call even with
+  `-fno-math-errno`, but `(float)__builtin_sqrtl(x)` under it is one `fsqrt`, ~70 and ~85 cycles, and
+  rounds to the same float (a 64-bit intermediate is more than the 2 × 24 + 2 bits double rounding of
+  a square root needs to be harmless). The builtin is GCC and Clang only, so it wants a small helper
+  with `sqrtf` as the fallback. `-fno-math-errno` for the library is safe regardless — nothing reads
+  `errno` — and the span loop wants it for `lrintf`, which it makes a single `fistp`.
+  `-funsafe-math-optimizations` would also give `fsqrt`, but it licenses reassociation, which golden
+  frames cannot have. Together with `-ffp-contract=off` and no fast-math this puts golden-frame tests back on the
   table — per instruction set, not across them: with geometry staying float (Settled decisions), x87
   and SSE builds differ in intermediate precision, and the benchmark's checksums already do. The x87
   frames matched bit for bit between a desktop `-m32 -mfpmath=387` build and DJGPP on 86Box, so one

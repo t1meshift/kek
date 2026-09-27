@@ -59,7 +59,18 @@ find_package(kek REQUIRED)
 target_link_libraries(my_game PRIVATE kek::kek)
 ```
 
-with `-DCMAKE_PREFIX_PATH=<prefix>` when configuring the consumer. `add_subdirectory` gives the same `kek::kek`. The `KEK_*` limits (framebuffer size, pool capacities) are compile-time for now and baked into the installed package. `demo/` is a complete consumer and builds that way on its own:
+with `-DCMAKE_PREFIX_PATH=<prefix>` when configuring the consumer. `add_subdirectory` gives the same `kek::kek`.
+
+The application owns the engine's memory. It hands `kek_init` one block, and the engine lays out its frame, depth buffer and palettes inside it:
+
+```c
+static unsigned char memory[KEK_MEMORY_SIZE(320, 200)];
+KEK_engine engine;
+
+kek_init(&engine, &(KEK_desc){ .width = 320, .height = 200 }, memory, sizeof memory);
+```
+
+The pool limits (`KEK_MODEL_POOL_CAPACITY` and the rest) are still compile-time and baked into the installed package, until the pools move into the block as well. `demo/` is a complete consumer and builds that way on its own:
 
 ```sh
 cmake -S demo -B build-demo -DCMAKE_PREFIX_PATH=<prefix>

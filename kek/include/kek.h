@@ -5,8 +5,10 @@
 extern "C" {
 #endif
 
+#include <stddef.h>
 #include <stdint.h>
 #include "kek_asset.h"
+#include "kek_config.h"
 #include "kek_palette.h"
 #include "kek_keyboard.h"
 #include "kek_light.h"
@@ -32,6 +34,7 @@ struct KEK_engine {
     KEK_scene* scene;
     KEK_scene* next_scene;
     KEK_AssetProvider* assets;
+    /* All four point into the block handed to kek_init. */
     KEK_palette_item* palette; /* 256-color palette */
     uint8_t* shading_palette;
     uint8_t* fb; /** framebuffer */
@@ -48,7 +51,44 @@ struct KEK_engine {
     KEK_KeyboardState keyboard;
 };
 
-KEK_engine kek_init(void);
+/* What an engine is made with. Fields may be added; a caller that fills it with
+   a designated initializer keeps compiling and gets zero for anything new. */
+typedef struct KEK_desc {
+    uint16_t width;  /* of the frame, in pixels */
+    uint16_t height;
+} KEK_desc;
+
+/* The application hands kek_init one block and the engine lays out its frame,
+   depth buffer and palettes inside it; where the block comes from — a static array, one malloc
+   at startup, a fixed region on a machine without either — is the
+   application's business. The block need not be aligned: the layout starts at
+   the first KEK_MEMORY_ALIGN boundary inside it, and the size accounts for
+   that.
+
+   KEK_MEMORY_SIZE is the same number as kek_memory_size, as a constant
+   expression for sizing a static array:
+
+       static unsigned char memory[KEK_MEMORY_SIZE(320, 200)];
+
+   Its arguments are evaluated more than once. */
+#define KEK_MEMORY_ALIGN 16u
+#define KEK_MEMORY_ROUND_(n) \
+    (((size_t)(n) + (KEK_MEMORY_ALIGN - 1u)) & ~(size_t)(KEK_MEMORY_ALIGN - 1u))
+#define KEK_MEMORY_SIZE(width, height) \
+    ((size_t)(KEK_MEMORY_ALIGN - 1u) \
+     + KEK_MEMORY_ROUND_((size_t)(width) * (size_t)(height)) \
+     + KEK_MEMORY_ROUND_((size_t)(width) * (size_t)(height) * sizeof(float)) \
+     + KEK_MEMORY_ROUND_(256u * sizeof(KEK_palette_item)) \
+     + KEK_MEMORY_ROUND_((size_t)256u * (size_t)KEK_PALETTE_SHADING_LEVELS))
+
+size_t kek_memory_size(const KEK_desc* desc);
+
+/* Returns 1 with the engine ready, or 0 without touching the engine or the
+   block when desc has a zero dimension or the block is null or smaller than
+   kek_memory_size.
+   The engine points into the block from then on, so the block has to outlive
+   it. The frame starts cleared and the palette is the default one. */
+int kek_init(KEK_engine* engine, const KEK_desc* desc, void* memory, size_t size);
 void kek_pool_init(KEK_engine* engine);
 
 void kek_set_palette(KEK_engine* e, const KEK_palette_item* palette);

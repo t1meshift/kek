@@ -61,8 +61,6 @@ if(KEK_BUILD_TESTS)
   endif()
 endif()
 
-set(KEK_BUFFER_WIDTH 320 CACHE STRING "Framebuffer width in pixels")
-set(KEK_BUFFER_HEIGHT 200 CACHE STRING "Framebuffer height in pixels")
 set(KEK_TARGET_FPS 30 CACHE STRING "Frames per second the platform layer paces to")
 set(KEK_MODEL_POOL_CAPACITY 16 CACHE STRING "Max pooled models")
 set(KEK_TEXTURE_POOL_CAPACITY 16 CACHE STRING "Max pooled textures")
@@ -171,8 +169,6 @@ target_include_directories(kek PUBLIC
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/kek>
 )
 target_compile_definitions(kek PUBLIC
-  KEK_BUFFER_WIDTH=${KEK_BUFFER_WIDTH}u
-  KEK_BUFFER_HEIGHT=${KEK_BUFFER_HEIGHT}u
   KEK_TARGET_FPS=${KEK_TARGET_FPS}u
   KEK_MODEL_POOL_CAPACITY=${KEK_MODEL_POOL_CAPACITY}
   KEK_TEXTURE_POOL_CAPACITY=${KEK_TEXTURE_POOL_CAPACITY}
@@ -260,8 +256,6 @@ if(KEK_BUILD_TESTS)
     kek/include/
   )
   target_compile_definitions(kek_test_small_uvs PUBLIC
-    KEK_BUFFER_WIDTH=${KEK_BUFFER_WIDTH}u
-    KEK_BUFFER_HEIGHT=${KEK_BUFFER_HEIGHT}u
     KEK_TARGET_FPS=${KEK_TARGET_FPS}u
     KEK_MODEL_POOL_CAPACITY=2
     KEK_TEXTURE_POOL_CAPACITY=${KEK_TEXTURE_POOL_CAPACITY}

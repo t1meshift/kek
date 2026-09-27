@@ -25,7 +25,7 @@ static KEK_MemoryAssetProvider provider;
 static int free_textures;
 
 void setUp(void) {
-    e = kek_init();
+    kek_test_init(&e);
     kek_test_file_clear(&file);
     asset.path = "image.kif";
     asset.bytes = file.bytes;

@@ -11,6 +11,7 @@
 #include "unity.h"
 #include "kek.h"
 #include "kek_keyboard.h"
+#include "test_support.h"
 
 #define KEY KEK_SCANCODE_SPACE
 #define OTHER KEK_SCANCODE_W
@@ -99,7 +100,7 @@ static void probe_init(Probe* p) {
 }
 
 void setUp(void) {
-    e = kek_init();
+    kek_test_init(&e);
     probe_init(&A);
     probe_init(&B);
     kek_set_scene(&e, &A.base);
@@ -243,7 +244,7 @@ void test_render_after_update_sees_the_hold_but_not_the_edge(void) {
 }
 
 void test_the_state_is_kept_without_a_scene(void) {
-    e = kek_init();
+    kek_test_init(&e);
 
     kek_key_down(&e, KEY);
     TEST_ASSERT_TRUE(kek_key_held(&e, KEY));

@@ -6,6 +6,7 @@
 #include "unity.h"
 #include "kek.h"
 #include "kek_texture.h"
+#include "test_support.h"
 
 /* Texel (x, y) holds 10 * y + x. */
 static uint8_t PIXELS[4 * 2] = {
@@ -17,7 +18,7 @@ static KEK_texture texture = { PIXELS, 4, 2 };
 static KEK_engine e;
 
 void setUp(void) {
-    e = kek_init();
+    kek_test_init(&e);
 }
 
 void tearDown(void) {

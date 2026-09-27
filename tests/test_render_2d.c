@@ -6,8 +6,8 @@
    rasterisation rules. Nothing is written outside the frame; what lies wholly
    off screen draws nothing; what covers the screen covers all of it; and a
    few exact counts where the primitive's definition fixes them. Each battery
-   runs at the engine's own size and at an odd one, so code that reads
-   KEK_BUFFER_WIDTH instead of e->w shows. */
+   runs at 320x200 and at an odd size, so code that assumes the first
+   instead of reading e->w shows. */
 
 #include <string.h>
 #include "unity.h"
@@ -21,7 +21,7 @@ static KEK_engine e;
 static const struct {
     uint16_t w, h;
 } SIZES[] = {
-    { KEK_BUFFER_WIDTH, KEK_BUFFER_HEIGHT },
+    { KEK_TEST_WIDTH, KEK_TEST_HEIGHT },
     { 61, 37 }
 };
 #define SIZE_COUNT (sizeof(SIZES) / sizeof(SIZES[0]))
@@ -30,7 +30,7 @@ static const struct {
 #define BORDER 12
 
 void setUp(void) {
-    e = kek_init();
+    kek_test_init(&e);
 }
 
 void tearDown(void) {

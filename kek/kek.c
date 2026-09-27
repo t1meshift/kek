@@ -7,20 +7,40 @@
 #include "kek_config.h"
 #include "kek_math.h"
 
-static uint8_t KEK_FRAMEBUFFER[KEK_BUFFER_WIDTH * KEK_BUFFER_HEIGHT];
-static float KEK_DEPTHBUFFER[KEK_BUFFER_WIDTH * KEK_BUFFER_HEIGHT];
-static KEK_palette_item KEK_PALETTE[256];
-static uint8_t KEK_SHADING_PALETTE[256 * KEK_PALETTE_SHADING_LEVELS];
+size_t kek_memory_size(const KEK_desc* desc) {
+    return KEK_MEMORY_SIZE(desc->width, desc->height);
+}
 
-KEK_engine kek_init(void) {
+/* Hands out the block front to back, each piece on a KEK_MEMORY_ALIGN
+   boundary. The order and the rounding are KEK_MEMORY_SIZE's, which is what
+   makes the size it promises enough. */
+static void* kek_memory_take_(uintptr_t* cursor, size_t size) {
+    void* result = (void*)*cursor;
+    *cursor += KEK_MEMORY_ROUND_(size);
+    return result;
+}
+
+int kek_init(KEK_engine* e, const KEK_desc* desc, void* memory, size_t size) {
     KEK_engine result;
+    uintptr_t cursor;
+    size_t pixels;
+
+    if (!e || !desc || !memory || desc->width == 0 || desc->height == 0
+        || size < kek_memory_size(desc)) {
+        return 0;
+    }
+    pixels = (size_t)desc->width * desc->height;
+    cursor = ((uintptr_t)memory + (KEK_MEMORY_ALIGN - 1u)) & ~(uintptr_t)(KEK_MEMORY_ALIGN - 1u);
+
     result.scene = 0;
     result.next_scene = 0;
     result.assets = 0;
-    result.fb = KEK_FRAMEBUFFER;
-    result.db = KEK_DEPTHBUFFER;
-    result.w = KEK_BUFFER_WIDTH;
-    result.h = KEK_BUFFER_HEIGHT;
+    result.fb = (uint8_t*)kek_memory_take_(&cursor, pixels);
+    result.db = (float*)kek_memory_take_(&cursor, pixels * sizeof(float));
+    result.palette = (KEK_palette_item*)kek_memory_take_(&cursor, 256u * sizeof(KEK_palette_item));
+    result.shading_palette = (uint8_t*)kek_memory_take_(&cursor, (size_t)256u * KEK_PALETTE_SHADING_LEVELS);
+    result.w = desc->width;
+    result.h = desc->height;
     result.target_fps = KEK_TARGET_FPS;
     result.model_pool.slots = 0;
     result.model_pool.capacity = 0;
@@ -38,13 +58,15 @@ KEK_engine kek_init(void) {
     result.light.fog_end = 0.f;
     memset(&result.keyboard, 0, sizeof(result.keyboard));
 
-    result.palette = KEK_PALETTE;
     memcpy(result.palette, KEK_DEFAULT_PALETTE, 256 * sizeof(KEK_palette_item));
-    result.shading_palette = KEK_SHADING_PALETTE;
     kek_invalidate_shading_palette(&result);
+    /* The block is whatever the application had lying there, not the zeroes a
+       static buffer used to start with. */
+    kek_flush_buffers(&result);
     kek_pool_init(&result);
 
-    return result;
+    *e = result;
+    return 1;
 }
 
 void kek_set_palette(KEK_engine *e, const KEK_palette_item *palette) {

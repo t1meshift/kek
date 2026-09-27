@@ -18,8 +18,8 @@ static KEK_engine e;
 #define FAR_INK 5
 
 void setUp(void) {
-    e = kek_init();
-    kek_test_frame_attach(&e, KEK_BUFFER_WIDTH, KEK_BUFFER_HEIGHT);
+    kek_test_init(&e);
+    kek_test_frame_attach(&e, KEK_TEST_WIDTH, KEK_TEST_HEIGHT);
 }
 
 void tearDown(void) {
@@ -421,7 +421,7 @@ void test_a_shade_past_the_last_level_is_the_last_row(void) {
 /* The same textured triangle unshaded and at the darkest level: pixel for
    pixel, the second is the first looked up in the last row. */
 void test_a_shaded_texture_is_the_unshaded_one_through_the_shading_palette(void) {
-    static uint8_t unshaded[KEK_BUFFER_WIDTH * KEK_BUFFER_HEIGHT];
+    static uint8_t unshaded[KEK_TEST_WIDTH * KEK_TEST_HEIGHT];
     const KEK_texture* texture = kek_texture_get(&e, kek_default_texture_handle(&e));
     KEK_3D_ProjectedVertex v[3];
     int x, y, k;

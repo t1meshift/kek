@@ -19,7 +19,7 @@ static uint8_t TEXTURE_PIXELS[4 * 2] = { 1, 2, 3, 4, 5, 6, 7, 8 };
 static KEK_texture SMALL_TEXTURE = { TEXTURE_PIXELS, 4, 2 };
 
 void setUp(void) {
-    e = kek_init();
+    kek_test_init(&e);
 }
 
 void tearDown(void) {
@@ -226,7 +226,7 @@ void test_init_empties_a_full_pool(void) {
     while (kek_texture_create(&e) != KEK_TEXTURE_HANDLE_INVALID) {
     }
 
-    e = kek_init();
+    kek_test_init(&e);
     TEST_ASSERT_EQUAL_INT(free_models, kek_test_free_models(&e));
     TEST_ASSERT_EQUAL_INT(free_textures, kek_test_free_textures(&e));
 }

@@ -94,7 +94,7 @@ static void write_kmf(uint16_t faces_count) {
 }
 
 void setUp(void) {
-    e = kek_init();
+    kek_test_init(&e);
     assets[0].path = "model.kmf";
     assets[0].bytes = model_file.bytes;
     assets[0].size = 0;

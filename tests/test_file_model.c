@@ -203,7 +203,7 @@ static void large_model(uint16_t vertices, uint16_t faces) {
 }
 
 void setUp(void) {
-    e = kek_init();
+    kek_test_init(&e);
     assets[0].path = "model.kmf";
     assets[0].bytes = model_file.bytes;
     assets[0].size = 0;

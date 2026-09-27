@@ -9,6 +9,15 @@
 #include <stdint.h>
 #include "kek.h"
 
+/* The frame kek_test_init gives an engine: VGA's, and the size the render
+   suites attach by default. */
+#define KEK_TEST_WIDTH 320u
+#define KEK_TEST_HEIGHT 200u
+
+/* kek_init over a block of the suites' own, sized for KEK_TEST_WIDTH x
+   KEK_TEST_HEIGHT. Fails the test if kek_init does. */
+void kek_test_init(KEK_engine* e);
+
 /* How many more models (textures) the pool will hand out right now. Takes
    them all, counts, and gives them back, so the pool is left as it was apart
    from the generations of the slots it touched. */
@@ -41,10 +50,10 @@ void kek_test_file_patch_u16(KEK_TestFile* file, size_t offset, uint16_t value);
    A render that strays by a byte shows up in kek_test_frame_assert_guards
    even where ASan, seeing one array, would not.
 
-   Attaching also sets e->w and e->h, so a size other than the engine's own
-   320x200 catches code that reads the macros instead of the engine. */
+   Attaching also sets e->w and e->h, so a size other than 320x200 catches
+   code that assumes one. */
 #define KEK_TEST_FRAME_GUARD 256
-#define KEK_TEST_FRAME_MAX_PIXELS ((size_t)KEK_BUFFER_WIDTH * KEK_BUFFER_HEIGHT)
+#define KEK_TEST_FRAME_MAX_PIXELS ((size_t)KEK_TEST_WIDTH * KEK_TEST_HEIGHT)
 
 void kek_test_frame_attach(KEK_engine* e, uint16_t w, uint16_t h);
 /* Clears pixels and depth through kek_flush_buffers; guards are left alone. */

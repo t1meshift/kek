@@ -4,6 +4,13 @@
 #include "kek_model.h"
 #include "kek_texture.h"
 
+void kek_test_init(KEK_engine* e) {
+    static unsigned char memory[KEK_MEMORY_SIZE(KEK_TEST_WIDTH, KEK_TEST_HEIGHT)];
+    const KEK_desc desc = { KEK_TEST_WIDTH, KEK_TEST_HEIGHT };
+
+    TEST_ASSERT_TRUE_MESSAGE(kek_init(e, &desc, memory, sizeof(memory)), "kek_init failed");
+}
+
 /* Far past any pool this engine configures; hitting it means the pool never
    said no, which is a failure in its own right. */
 #define KEK_TEST_MAX_HANDLES 4096

@@ -16,12 +16,16 @@ from requestAnimationFrame.
 #include <kek.h>
 #include <demo.h>
 
+/* VGA mode 13h: 256 colours, one byte per pixel, which is what the engine's
+   frame is. The window is an exact 4x of it. */
+#define APP_FRAME_WIDTH 320
+#define APP_FRAME_HEIGHT 200
 #define APP_WINDOW_WIDTH 1280
 #define APP_WINDOW_HEIGHT 800
 
 /* Scenes keep the KEK_engine* they are handed, so the engine has to outlive the
    callback that created it — hence the app state instead of locals in main().
-   It is static for the same reason the engine's buffers are: no allocations. */
+   It is static for the same reason the engine's memory is: no allocations. */
 typedef struct App {
     SDL_Window* window;
     SDL_Renderer* renderer;
@@ -34,6 +38,7 @@ typedef struct App {
 } App;
 
 static App APP;
+static unsigned char APP_ENGINE_MEMORY[KEK_MEMORY_SIZE(APP_FRAME_WIDTH, APP_FRAME_HEIGHT)];
 
 static void app_build_palette(App* app) {
     for (int i = 0; i < 256; ++i) {
@@ -87,7 +92,11 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         return SDL_APP_FAILURE;
     }
 
-    app->engine = kek_init();
+    if (!kek_init(&app->engine, &(KEK_desc){ .width = APP_FRAME_WIDTH, .height = APP_FRAME_HEIGHT },
+                  APP_ENGINE_MEMORY, sizeof(APP_ENGINE_MEMORY))) {
+        SDL_Log("kek_init failed");
+        return SDL_APP_FAILURE;
+    }
     fs_asset_provider_init(&app->assets, "./assets/");
     app->engine.assets = &app->assets.base;
     kek_set_scene(&app->engine, DEMO_init_ctx());

@@ -4,6 +4,7 @@
    nearer surface wins whatever the draw order, what is off screen or behind
    the camera draws nothing, and what covers the screen covers all of it. */
 
+#include <stdio.h>
 #include <string.h>
 #include "unity.h"
 #include "kek.h"
@@ -207,6 +208,103 @@ void test_a_textured_triangle_larger_than_the_frame_fills_it_in_both_wrap_modes(
         TEST_ASSERT_EQUAL_INT(w * h, kek_test_frame_painted(&e));
         kek_test_frame_assert_guards();
     }
+}
+
+/* The rows a triangle is walked in cover exactly the pixels a closed triangle
+   contains: every edge function >= 0, or every one <= 0, worked out here in
+   64-bit integers. Random triangles, some reaching far off the frame, each on
+   a cleared frame and compared pixel for pixel over the whole of it. */
+static uint32_t lcg_state;
+
+static int lcg_range(int lo, int hi) {
+    lcg_state = lcg_state * 1664525u + 1013904223u;
+    return lo + (int)((lcg_state >> 8) % (uint32_t)(hi - lo + 1));
+}
+
+static int64_t edge(int ax, int ay, int bx, int by, int x, int y) {
+    return (int64_t)(x - ax) * (by - ay) - (int64_t)(y - ay) * (bx - ax);
+}
+
+void test_rows_cover_exactly_the_pixels_of_the_closed_triangle(void) {
+    int t, x, y;
+
+    lcg_state = 12345u;
+    for (t = 0; t < 400; ++t) {
+        int reach = t % 4 == 0 ? 20000 : 400;
+        int ax = lcg_range(-reach, e.w + reach), ay = lcg_range(-reach, e.h + reach);
+        int bx = lcg_range(-40, e.w + 40), by = lcg_range(-40, e.h + 40);
+        int cx = t % 3 == 0 ? bx + lcg_range(-3, 3) : lcg_range(-40, e.w + 40);
+        int cy = t % 3 == 0 ? by + lcg_range(-60, 60) : lcg_range(-40, e.h + 40);
+
+        kek_test_frame_clear(&e);
+        flat(vertex(ax, ay, 3.f), vertex(bx, by, 3.f), vertex(cx, cy, 3.f), NEAR_INK);
+        for (y = 0; y < e.h; ++y) {
+            for (x = 0; x < e.w; ++x) {
+                int64_t w0 = edge(bx, by, cx, cy, x, y);
+                int64_t w1 = edge(cx, cy, ax, ay, x, y);
+                int64_t w2 = edge(ax, ay, bx, by, x, y);
+                int area = edge(ax, ay, bx, by, cx, cy) != 0;
+                int inside = area && ((w0 >= 0 && w1 >= 0 && w2 >= 0) || (w0 <= 0 && w1 <= 0 && w2 <= 0));
+                if (inside != (kek_test_frame_pixel(&e, x, y) == NEAR_INK)) {
+                    char message[128];
+                    (void)snprintf(message, sizeof(message), "triangle %d (%d,%d) (%d,%d) (%d,%d), pixel (%d,%d)",
+                             t, ax, ay, bx, by, cx, cy, x, y);
+                    TEST_FAIL_MESSAGE(message);
+                }
+            }
+        }
+    }
+    kek_test_frame_assert_guards();
+}
+
+/* A side that is not a power of two leaves the span loop's masks out, and the
+   texture goes through the sampler per pixel instead. Still every pixel, in
+   both wrap modes, and nothing outside the frame. */
+void test_a_texture_of_any_size_fills_the_frame_in_both_wrap_modes(void) {
+    KEK_TextureHandle handle = kek_texture_create(&e, 3, 5);
+    KEK_texture* texture = kek_texture_get(&e, handle);
+    int w = e.w, h = e.h;
+    KEK_3D_ProjectedVertex v[3];
+    int mode;
+
+    TEST_ASSERT_NOT_NULL(texture);
+    memset(texture->data, 9, (size_t)3 * 5);
+    for (mode = 0; mode < 2; ++mode) {
+        kek_texture_set_warp_mode(&e, mode ? KEK_TEXTURE_WARP_REPEAT : KEK_TEXTURE_WARP_CLAMP);
+        kek_test_frame_clear(&e);
+        v[0] = vertex(-10 * w, -10 * h, 3.f);
+        v[1] = vertex(10 * w, -10 * h, 3.f);
+        v[2] = vertex(w / 2, 10 * h, 3.f);
+        kek_3d_triangle_textured(&e, v, texture);
+        TEST_ASSERT_EQUAL_INT(w * h, kek_test_frame_count(&e, 9));
+        kek_test_frame_assert_guards();
+    }
+    kek_texture_set_warp_mode(&e, KEK_TEXTURE_WARP_CLAMP);
+    kek_texture_destroy(&e, handle);
+}
+
+/* Under CLAMP, UVs past the far corner sample the far corner's texel and
+   nothing else, however far past it they are. */
+void test_uvs_past_the_texture_sample_its_edge_under_clamp(void) {
+    KEK_TextureHandle handle = kek_texture_create(&e, 4, 4);
+    KEK_texture* texture = kek_texture_get(&e, handle);
+    KEK_3D_ProjectedVertex v[3];
+    int i;
+
+    TEST_ASSERT_NOT_NULL(texture);
+    for (i = 0; i < 16; ++i) {
+        texture->data[i] = (uint8_t)(i + 1);
+    }
+    for (i = 0; i < 3; ++i) {
+        v[i] = vertex(i == 1 ? 300 : 10, i == 2 ? 190 : 10, 3.f);
+        v[i].u_over_z = (1.f + (float)i * 50.f) * v[i].inv_z;
+        v[i].v_over_z = (1.f + (float)i * 7.f) * v[i].inv_z;
+    }
+    kek_3d_triangle_textured(&e, v, texture);
+    TEST_ASSERT_GREATER_THAN_INT(0, kek_test_frame_count(&e, 16));
+    TEST_ASSERT_EQUAL_INT(kek_test_frame_painted(&e), kek_test_frame_count(&e, 16));
+    kek_test_frame_assert_guards();
+    kek_texture_destroy(&e, handle);
 }
 
 /* ---- Whole models ---- */
@@ -522,6 +620,9 @@ int main(void) {
     RUN_TEST(test_degenerate_triangles_stay_in_the_frame);
     RUN_TEST(test_a_triangle_larger_than_the_frame_fills_it);
     RUN_TEST(test_a_textured_triangle_larger_than_the_frame_fills_it_in_both_wrap_modes);
+    RUN_TEST(test_rows_cover_exactly_the_pixels_of_the_closed_triangle);
+    RUN_TEST(test_a_texture_of_any_size_fills_the_frame_in_both_wrap_modes);
+    RUN_TEST(test_uvs_past_the_texture_sample_its_edge_under_clamp);
     RUN_TEST(test_a_cube_in_front_of_the_camera_draws);
     RUN_TEST(test_a_cube_behind_the_camera_or_past_the_far_plane_draws_nothing);
     RUN_TEST(test_cubes_through_the_near_plane_and_off_the_edges_stay_in_the_frame);

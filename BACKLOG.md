@@ -89,9 +89,17 @@ on a 32-bit one, plus whatever the application gives its arena. Nearly all of it
 - **The sampler is what a textured pixel costs now.** With the divides gone (`0945961`),
   `kek_texture_sample` is a call into another file per pixel, a branch on the warp mode, `floorf` twice
   under `REPEAT`, a clamp and two float-to-int conversions — each of those an `fldcw` pair on an x87
-  without SSE3, which is every target. Quake stepped s and t in 16.16 fixed point along the span and
-  masked for wrap; the span loop already has u and v stepping linearly, so it is the same shape. Overlaps
-  with fixed point in Tier 2, and could go first as a local change inside the span.
+  without SSE3, which is every target, and a 486's `FIST` is around 30 cycles on top. On an emulated
+  486DX2-66 the benchmark's textured quad is ~1,300 cycles per painted pixel against ~460 for the flat
+  one. Quake stepped s and t in 16.16 fixed point along the span and masked for wrap; the span loop
+  already has u and v stepping linearly, so it is the same shape. Overlaps with fixed point in Tier 2,
+  and could go first as a local change inside the span.
+- **Every stepped float goes through memory on x87.** The library builds as strict C99, which on x87
+  makes GCC round each `float` assignment by storing and reloading it (`-fexcess-precision=standard`),
+  so `w0 += step` in the pixel loop is an `fadd`, an `fstp` and an `fld`. `-fexcess-precision=fast`
+  took 20% off the flat quad and 10% off the textured one on the emulated 486. Not worth taking as a
+  flag: results would then depend on which values the compiler keeps in 80-bit registers, and the
+  frames already changed with it, which is the opposite of golden frames. Fixed point makes it moot.
 - **The depth buffer is the single largest allocation.** 320×200×4 = 250 KB against 62.5 KB for the frame
   itself. Quantised `1/z` in `uint16` halves it and cuts memory traffic in the hot loop. Quake used a
   16-bit z-buffer at this resolution, and only for alias models.
@@ -165,7 +173,12 @@ and camera coordinates ([demo_scene_entry.c](demo/demo_scene_entry.c)).
   exactly 320×200 at 256 colours, so presenting is a copy to `0xA0000`, and the 0–63 channel range of
   `KEK_palette_item` is the VGA DAC range (ports `0x3C8`/`0x3C9`), and 256 of them are the 768-byte block
   the DAC takes. Build with DJGPP, from a build file of its own for the library: the CMake package does
-  not reach there.
+  not reach there. The official cross compiler (delorie.com's `djcross-gcc` RPMs, GCC 14.2) builds the
+  library and `bench/` for DOS unchanged, and 86Box runs them from a FreeDOS boot floppy. Two things
+  learnt measuring there: a fresh `ami471` CMOS has both caches off, which made the 486 three times
+  slower than the manual until setup's BIOS defaults were loaded, and 86Box's Pentium needs the dynamic
+  recompiler for Pentium timings but then prices a dependent `fdiv` at ~4 cycles instead of 39, so it
+  undersells anything about divides; the 486 matches the manual (`fdiv` 77 against 73).
 - **Scripts**: no `requirements.txt` (Pillow is needed), no round-trip tests for `obj_to_kmf` or
   `bmp_to_kif`. The default palette has three copies: the engine's table in
   [kek_palette.c](kek/kek_palette.c), a string in [palette_to_bmp.py](scripts/palette_to_bmp.py) parsed
@@ -242,7 +255,7 @@ on the hash has the reasoning, the measurements and what was verified.
 | --- | --- | --- |
 | Resolution hardcoded | `KEK_BUFFER_WIDTH`/`KEK_BUFFER_HEIGHT`/`KEK_TARGET_FPS` were `#define`s at the top of `kek.c`. In `kek_config.h` with the other knobs now, with CMake cache entries | `f99074d` |
 | No lighting | The shading palette was computed at init and `kek_3d_draw_model` never used it. Flat shading from a world-fixed directional light plus ambient, with the normal derived from the face; fog with view depth; Bayer 4×4 dither between rows | `424f69e` |
-| Divides in the per-pixel loop | Three per pixel in `kek_3d_triangle` (`w0 / area`), five in `kek_3d_triangle_textured` (and `u_over_z / inv_z`), and no way to measure them. A benchmark in `bench/`; one divide per triangle, attributes as planes stepped by adds, and perspective divided out every 16 pixels with affine spans between, as in Quake | `954cb4c`, `0945961` |
+| Divides in the per-pixel loop | Three per pixel in `kek_3d_triangle` (`w0 / area`), five in `kek_3d_triangle_textured` (and `u_over_z / inv_z`), and no way to measure them. A benchmark in `bench/`; one divide per triangle, attributes as planes stepped by adds, and perspective divided out every 16 pixels with affine spans between, as in Quake. On an emulated 486DX2-66 (86Box, DJGPP): flat quad 791 → 445 ms, textured quad 1,681 → 1,242 ms, textured cube 478 → 346 ms | `954cb4c`, `0945961` |
 
 ### Found on the way, not from a backlog item
 

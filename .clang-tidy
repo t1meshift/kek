@@ -15,12 +15,9 @@ Checks: >
   portability-*,
   cert-*,
   -bugprone-narrowing-conversions,
-  -bugprone-reserved-identifier,
   -bugprone-easily-swappable-parameters,
   -bugprone-assignment-in-if-condition,
   -bugprone-switch-missing-default-case,
-  -cert-dcl37-c,
-  -cert-dcl51-cpp,
   -cert-int09-c,
   -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling
 
@@ -29,10 +26,6 @@ Checks: >
 # bugprone-narrowing-conversions — a software renderer converts between int and
 #   float on nearly every line, on purpose. ~60 hits, no signal. Revisit when
 #   the fixed-point transition lands; the check may earn its keep then.
-# bugprone-reserved-identifier (and its cert-dcl37-c / cert-dcl51-cpp aliases) —
-#   flags every existing _kek_* and _GAME_* file-scope static. Leading
-#   underscores at file scope are technically reserved; renaming them is its own
-#   change, not something to smuggle in behind a linter.
 # bugprone-easily-swappable-parameters — fires on every (x, y) and (w, h) in a
 #   rasterizer.
 # bugprone-assignment-in-if-condition, bugprone-switch-missing-default-case —
@@ -41,6 +34,10 @@ Checks: >
 #   deliberately "first one pinned, rest sequential".
 # clang-analyzer-security.insecureAPI...  — wants memcpy_s/memset_s. Annex K is
 #   optional, glibc does not have it, and neither will DJGPP.
+#
+# bugprone-reserved-identifier stays on: file-local names are marked with a
+#   trailing underscore (kek_apply_scene_switch_), never a leading one, which
+#   the standard reserves.
 #
 # cert-err33-c stays on deliberately: it flags ignored fseek/fread returns in
 # the asset provider, which is exactly the class of defect this project cares

@@ -17,7 +17,7 @@ static float key_axis(const KEK_engine* e, KEK_scancode positive, KEK_scancode n
     return (float)kek_key_held(e, positive) - (float)kek_key_held(e, negative);
 }
 
-static void _GAME_EntryScene_reset(GAME_EntryScene* s) {
+static void GAME_EntryScene_reset_(GAME_EntryScene* s) {
     s->base = (KEK_scene){
         .enter = &GAME_EntryScene_enter,
         .exit = &GAME_EntryScene_exit,
@@ -36,11 +36,11 @@ static void _GAME_EntryScene_reset(GAME_EntryScene* s) {
 
 GAME_EntryScene GAME_EntryScene_init(void) {
     GAME_EntryScene result;
-    _GAME_EntryScene_reset(&result);
+    GAME_EntryScene_reset_(&result);
     return result;
 }
 
-void _GAME_EntryScene_load_assets(GAME_EntryScene* s, KEK_engine* e) {
+void GAME_EntryScene_load_assets_(GAME_EntryScene* s, KEK_engine* e) {
     KEK_model* mdl;
 
     if (!e) {
@@ -73,10 +73,10 @@ void _GAME_EntryScene_load_assets(GAME_EntryScene* s, KEK_engine* e) {
 
 void GAME_EntryScene_enter(KEK_scene* scene, KEK_engine* e) {
     GAME_EntryScene* s = (GAME_EntryScene*)scene;
-    _GAME_EntryScene_reset(s);
+    GAME_EntryScene_reset_(s);
     kek_texture_set_warp_mode(e, KEK_TEXTURE_WARP_CLAMP);
 
-    _GAME_EntryScene_load_assets(s, e);
+    GAME_EntryScene_load_assets_(s, e);
 }
 
 void GAME_EntryScene_exit(KEK_scene* scene, KEK_engine* e) {

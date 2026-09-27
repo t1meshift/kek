@@ -15,31 +15,31 @@ typedef struct FS_AssetStreamState {
 static_assert(sizeof(FS_AssetStreamState) <= sizeof(((KEK_AssetStream*)0)->impl), "");
 static_assert(offsetof(FS_AssetProvider, base) == 0, "");
 
-static size_t _fs_asset_read(KEK_AssetStream* stream, void* dst, size_t size);
-static int _fs_asset_seek(KEK_AssetStream* stream, size_t offset);
-static size_t _fs_asset_tell(KEK_AssetStream* stream);
-static size_t _fs_asset_size(KEK_AssetStream* stream);
-static void _fs_asset_close(KEK_AssetStream* stream);
-static int _fs_asset_stat(KEK_AssetProvider* provider, const char* path, KEK_AssetInfo* out_info);
-static int _fs_asset_open(KEK_AssetProvider* provider, const char* path, KEK_AssetStream* out_stream);
+static size_t fs_asset_read_(KEK_AssetStream* stream, void* dst, size_t size);
+static int fs_asset_seek_(KEK_AssetStream* stream, size_t offset);
+static size_t fs_asset_tell_(KEK_AssetStream* stream);
+static size_t fs_asset_size_(KEK_AssetStream* stream);
+static void fs_asset_close_(KEK_AssetStream* stream);
+static int fs_asset_stat_(KEK_AssetProvider* provider, const char* path, KEK_AssetInfo* out_info);
+static int fs_asset_open_(KEK_AssetProvider* provider, const char* path, KEK_AssetStream* out_stream);
 
 static const KEK_AssetStreamVTable FS_ASSET_STREAM_VTABLE = {
-    _fs_asset_read,
-    _fs_asset_seek,
-    _fs_asset_tell,
-    _fs_asset_size,
-    _fs_asset_close
+    fs_asset_read_,
+    fs_asset_seek_,
+    fs_asset_tell_,
+    fs_asset_size_,
+    fs_asset_close_
 };
 
-static FS_AssetStreamState* _fs_asset_stream_state(KEK_AssetStream* stream) {
+static FS_AssetStreamState* fs_asset_stream_state_(KEK_AssetStream* stream) {
     return (FS_AssetStreamState*)stream->impl;
 }
 
-static const FS_AssetStreamState* _fs_asset_stream_state_const(const KEK_AssetStream* stream) {
+static const FS_AssetStreamState* fs_asset_stream_state_const_(const KEK_AssetStream* stream) {
     return (const FS_AssetStreamState*)stream->impl;
 }
 
-static int _fs_asset_build_path(char* dst, size_t dst_size, const char* root_path, const char* path) {
+static int fs_asset_build_path_(char* dst, size_t dst_size, const char* root_path, const char* path) {
     size_t root_len;
     size_t path_len;
 
@@ -62,7 +62,7 @@ static int _fs_asset_build_path(char* dst, size_t dst_size, const char* root_pat
     return 1;
 }
 
-static FILE* _fs_asset_fopen_rb(const char* path) {
+static FILE* fs_asset_fopen_rb_(const char* path) {
 #if defined(_MSC_VER)
     FILE* file = NULL;
     return fopen_s(&file, path, "rb") == 0 ? file : NULL;
@@ -71,7 +71,7 @@ static FILE* _fs_asset_fopen_rb(const char* path) {
 #endif
 }
 
-static int _fs_asset_query_size(FILE* file, size_t* out_size) {
+static int fs_asset_query_size_(FILE* file, size_t* out_size) {
     long file_size;
 
     if (!file || !out_size) {
@@ -91,7 +91,7 @@ static int _fs_asset_query_size(FILE* file, size_t* out_size) {
     return 1;
 }
 
-static int _fs_asset_stat(KEK_AssetProvider* provider, const char* path, KEK_AssetInfo* out_info) {
+static int fs_asset_stat_(KEK_AssetProvider* provider, const char* path, KEK_AssetInfo* out_info) {
     FS_AssetProvider* fs_provider;
     char full_path[FS_ASSET_PATH_CAPACITY];
     FILE* file;
@@ -101,16 +101,16 @@ static int _fs_asset_stat(KEK_AssetProvider* provider, const char* path, KEK_Ass
     }
 
     fs_provider = (FS_AssetProvider*)provider;
-    if (!_fs_asset_build_path(full_path, sizeof(full_path), fs_provider->root_path, path)) {
+    if (!fs_asset_build_path_(full_path, sizeof(full_path), fs_provider->root_path, path)) {
         return 0;
     }
 
-    file = _fs_asset_fopen_rb(full_path);
+    file = fs_asset_fopen_rb_(full_path);
     if (!file) {
         return 0;
     }
 
-    if (!_fs_asset_query_size(file, &out_info->size)) {
+    if (!fs_asset_query_size_(file, &out_info->size)) {
         (void)fclose(file);
         return 0;
     }
@@ -119,7 +119,7 @@ static int _fs_asset_stat(KEK_AssetProvider* provider, const char* path, KEK_Ass
     return 1;
 }
 
-static int _fs_asset_open(KEK_AssetProvider* provider, const char* path, KEK_AssetStream* out_stream) {
+static int fs_asset_open_(KEK_AssetProvider* provider, const char* path, KEK_AssetStream* out_stream) {
     FS_AssetProvider* fs_provider;
     FS_AssetStreamState* state;
     char full_path[FS_ASSET_PATH_CAPACITY];
@@ -133,16 +133,16 @@ static int _fs_asset_open(KEK_AssetProvider* provider, const char* path, KEK_Ass
     memset(out_stream, 0, sizeof(*out_stream));
 
     fs_provider = (FS_AssetProvider*)provider;
-    if (!_fs_asset_build_path(full_path, sizeof(full_path), fs_provider->root_path, path)) {
+    if (!fs_asset_build_path_(full_path, sizeof(full_path), fs_provider->root_path, path)) {
         return 0;
     }
 
-    file = _fs_asset_fopen_rb(full_path);
+    file = fs_asset_fopen_rb_(full_path);
     if (!file) {
         return 0;
     }
 
-    if (!_fs_asset_query_size(file, &size)) {
+    if (!fs_asset_query_size_(file, &size)) {
         (void)fclose(file);
         return 0;
     }
@@ -152,21 +152,21 @@ static int _fs_asset_open(KEK_AssetProvider* provider, const char* path, KEK_Ass
         return 0;
     }
 
-    state = _fs_asset_stream_state(out_stream);
+    state = fs_asset_stream_state_(out_stream);
     state->file = file;
     state->size = size;
     out_stream->vt = &FS_ASSET_STREAM_VTABLE;
     return 1;
 }
 
-static size_t _fs_asset_read(KEK_AssetStream* stream, void* dst, size_t size) {
+static size_t fs_asset_read_(KEK_AssetStream* stream, void* dst, size_t size) {
     FS_AssetStreamState* state;
 
     if (!stream || !dst) {
         return 0;
     }
 
-    state = _fs_asset_stream_state(stream);
+    state = fs_asset_stream_state_(stream);
     if (!state->file) {
         return 0;
     }
@@ -174,14 +174,14 @@ static size_t _fs_asset_read(KEK_AssetStream* stream, void* dst, size_t size) {
     return fread(dst, 1, size, state->file);
 }
 
-static int _fs_asset_seek(KEK_AssetStream* stream, size_t offset) {
+static int fs_asset_seek_(KEK_AssetStream* stream, size_t offset) {
     FS_AssetStreamState* state;
 
     if (!stream) {
         return 0;
     }
 
-    state = _fs_asset_stream_state(stream);
+    state = fs_asset_stream_state_(stream);
     if (!state->file || offset > state->size) {
         return 0;
     }
@@ -189,7 +189,7 @@ static int _fs_asset_seek(KEK_AssetStream* stream, size_t offset) {
     return fseek(state->file, (long)offset, SEEK_SET) == 0;
 }
 
-static size_t _fs_asset_tell(KEK_AssetStream* stream) {
+static size_t fs_asset_tell_(KEK_AssetStream* stream) {
     FS_AssetStreamState* state;
     long offset;
 
@@ -197,7 +197,7 @@ static size_t _fs_asset_tell(KEK_AssetStream* stream) {
         return 0;
     }
 
-    state = _fs_asset_stream_state(stream);
+    state = fs_asset_stream_state_(stream);
     if (!state->file) {
         return 0;
     }
@@ -210,25 +210,25 @@ static size_t _fs_asset_tell(KEK_AssetStream* stream) {
     return (size_t)offset;
 }
 
-static size_t _fs_asset_size(KEK_AssetStream* stream) {
+static size_t fs_asset_size_(KEK_AssetStream* stream) {
     const FS_AssetStreamState* state;
 
     if (!stream) {
         return 0;
     }
 
-    state = _fs_asset_stream_state_const(stream);
+    state = fs_asset_stream_state_const_(stream);
     return state->size;
 }
 
-static void _fs_asset_close(KEK_AssetStream* stream) {
+static void fs_asset_close_(KEK_AssetStream* stream) {
     FS_AssetStreamState* state;
 
     if (!stream) {
         return;
     }
 
-    state = _fs_asset_stream_state(stream);
+    state = fs_asset_stream_state_(stream);
     if (state->file) {
         (void)fclose(state->file);
     }
@@ -241,7 +241,7 @@ void fs_asset_provider_init(FS_AssetProvider* provider, const char* root_path) {
     }
 
     memset(provider, 0, sizeof(*provider));
-    provider->base.stat = _fs_asset_stat;
-    provider->base.open = _fs_asset_open;
+    provider->base.stat = fs_asset_stat_;
+    provider->base.open = fs_asset_open_;
     provider->root_path = root_path;
 }

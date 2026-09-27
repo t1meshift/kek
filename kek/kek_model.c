@@ -2,7 +2,7 @@
 #include "kek_math.h"
 #include "kek_texture.h"
 
-static KEK_FVec3 _kek_cube_verts[] = {
+static KEK_FVec3 kek_cube_verts_[] = {
     {-0.5, -0.5, -0.5},
     {-0.5, 0.5, -0.5},
     {0.5, 0.5, -0.5},
@@ -13,7 +13,7 @@ static KEK_FVec3 _kek_cube_verts[] = {
     {0.5, -0.5, 0.5}
 };
 
-static KEK_model_face _kek_cube_faces[] = {
+static KEK_model_face kek_cube_faces_[] = {
     {2, 6, 7},
     {2, 7, 3},
 
@@ -34,7 +34,7 @@ static KEK_model_face _kek_cube_faces[] = {
     {2, 0, 1}
 };
 
-static KEK_model_face_normal _kek_cube_face_normals[] = {
+static KEK_model_face_normal kek_cube_face_normals_[] = {
     {{1.f, 0.f, 0.f}, {1.f, 0.f, 0.f}, {1.f, 0.f, 0.f}},
     {{1.f, 0.f, 0.f}, {1.f, 0.f, 0.f}, {1.f, 0.f, 0.f}},
     {{-1.f, 0.f, 0.f}, {-1.f, 0.f, 0.f}, {-1.f, 0.f, 0.f}},
@@ -49,11 +49,11 @@ static KEK_model_face_normal _kek_cube_face_normals[] = {
     {{0.f, 0.f, -1.f}, {0.f, 0.f, -1.f}, {0.f, 0.f, -1.f}}
 };
 
-static uint8_t _kek_cube_colors[] = {
+static uint8_t kek_cube_colors_[] = {
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
 };
 
-static KEK_model_face_uv _kek_vts[] = {
+static KEK_model_face_uv kek_vts_[] = {
     // {2, 6, 7}
     {
         .a = {0.f, 0.f},
@@ -140,11 +140,11 @@ static KEK_model_face_uv _kek_vts[] = {
 };
 
 KEK_model KEK_CUBE_MODEL = {
-    .verts = _kek_cube_verts,
-    .faces = _kek_cube_faces,
-    .face_normals = _kek_cube_face_normals,
-    .face_colors = _kek_cube_colors,
-    .face_textures = _kek_vts,
+    .verts = kek_cube_verts_,
+    .faces = kek_cube_faces_,
+    .face_normals = kek_cube_face_normals_,
+    .face_colors = kek_cube_colors_,
+    .face_textures = kek_vts_,
     /* Texture handles only exist once a pool does; kek_pool_init hands the
        cloned cube the default texture's handle. */
     .texture = KEK_TEXTURE_HANDLE_INVALID,

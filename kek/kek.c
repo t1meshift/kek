@@ -136,7 +136,7 @@ int kek_key_released(const KEK_engine* e, uint16_t key) {
     return kek_keyboard_bit(e->keyboard.released, key);
 }
 
-static void _kek_apply_scene_switch(KEK_engine* e) {
+static void kek_apply_scene_switch_(KEK_engine* e) {
     if (!e->next_scene || e->next_scene == e->scene) {
         e->next_scene = 0;
         return;
@@ -179,7 +179,7 @@ void kek_update(KEK_engine* e, float dt) {
        to the next kek_update() belongs to the next update. */
     kek_keyboard_consume_edges(e);
 
-    _kek_apply_scene_switch(e);
+    kek_apply_scene_switch_(e);
 }
 
 void kek_render(KEK_engine* e) {

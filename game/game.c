@@ -4,10 +4,10 @@
 #include "game_tag.h"
 #include "game_scene_loader.h"
 
-KEK_scene* _GAME_scenes[GAME_SCENETAG_COUNT] = {0, };
+KEK_scene* GAME_scenes_[GAME_SCENETAG_COUNT] = {0, };
 
 GAME_Context GAME_ctx = {
-    .scenes = _GAME_scenes,
+    .scenes = GAME_scenes_,
     .scenes_count = GAME_SCENETAG_COUNT
 };
 

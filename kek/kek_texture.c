@@ -3,7 +3,7 @@
 #include "kek_macro.h"
 #include "kek_texture.h"
 
-static float _kek_texture_clamp01(float value) {
+static float kek_texture_clamp01_(float value) {
     if (value < 0.f) {
         return 0.f;
     }
@@ -13,7 +13,7 @@ static float _kek_texture_clamp01(float value) {
     return value;
 }
 
-static float _kek_texture_wrap_repeat(float value) {
+static float kek_texture_wrap_repeat_(float value) {
     value = value - floorf(value);
     if (value < 0.f) {
         value += 1.f;
@@ -21,7 +21,7 @@ static float _kek_texture_wrap_repeat(float value) {
     return value;
 }
 
-static float _kek_texture_resolve_uv(const KEK_engine* e, float value) {
+static float kek_texture_resolve_uv_(const KEK_engine* e, float value) {
     KEK_TextureWarpMode mode = KEK_TEXTURE_WARP_CLAMP;
 
     if (e) {
@@ -29,13 +29,13 @@ static float _kek_texture_resolve_uv(const KEK_engine* e, float value) {
     }
 
     if (mode == KEK_TEXTURE_WARP_REPEAT) {
-        return _kek_texture_wrap_repeat(value);
+        return kek_texture_wrap_repeat_(value);
     }
 
-    return _kek_texture_clamp01(value);
+    return kek_texture_clamp01_(value);
 }
 
-uint8_t _kek_bricks_texture_data[16*16] = {
+uint8_t kek_bricks_texture_data_[16*16] = {
     7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
     7,4,4,4,4,4,4,6,7,4,4,4,4,4,4,6,
     7,4,4,4,4,4,4,6,7,4,4,4,4,4,4,6,
@@ -57,7 +57,7 @@ uint8_t _kek_bricks_texture_data[16*16] = {
     6,4,4,4,4,4,4,4,6,7,4,4,4,4,4,4,
 };
 
-uint8_t _kek_default_texture_data[16*16] = {
+uint8_t kek_default_texture_data_[16*16] = {
     15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
     15, 1, 1, 1, 1, 1, 1,14,14, 2, 2, 2, 2, 2, 2,15,
     15, 1, 1, 1, 1, 1, 1,14,14, 2, 2, 2, 2, 2, 2,15,
@@ -80,8 +80,8 @@ uint8_t kek_texture_sample(const KEK_engine* e, const KEK_texture* texture, floa
     uint16_t x;
     uint16_t y;
 
-    u = _kek_texture_resolve_uv(e, u);
-    v = _kek_texture_resolve_uv(e, v);
+    u = kek_texture_resolve_uv_(e, u);
+    v = kek_texture_resolve_uv_(e, v);
 
     x = KEK_MIN((uint16_t)(u * (float)texture->width), texture->width - 1);
     y = KEK_MIN((uint16_t)(v * (float)texture->height), texture->height - 1);
@@ -106,7 +106,7 @@ KEK_TextureWarpMode kek_texture_get_warp_mode(const KEK_engine* e) {
 }
 
 KEK_texture KEK_DEFAULT_TEXTURE = {
-    .data = _kek_bricks_texture_data,
+    .data = kek_bricks_texture_data_,
     16,
     16
 };

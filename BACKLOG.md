@@ -24,21 +24,7 @@ These shape several items below, so they are recorded once here.
 
 ## Tier 0 — Foundation
 
-- **`kek_area_triangle_signed` multiplies screen coordinates in `int`**
-  ([kek_math.c](kek/kek_math.c)), and `kek_3d_draw_model` calls it for the backface cull after the
-  near-plane clip. A vertex put on the near plane projects far off screen: with the default camera
-  (fov 75, near 0.1, 320×200) each world unit of offset there is ~1300 px, so a wall some 35 units to the
-  side and 18 tall that runs past the camera takes the products past `INT_MAX`. The lateral cull does not
-  stop it, since the far end of the wall is on screen. The sign of the area is then garbage and the wall
-  can flicker between culled and drawn. Worked out from the projection, not yet reproduced under UBSan.
-  Converting to `float` before multiplying is the whole fix — the function already returns `float` —
-  plus a test through `kek_3d_draw_model` with a large polygon across the near plane. The rasterizers
-  themselves are safe: their edge functions are `float`.
-
-- **`kek_texture_sample` converts NaN to an integer**, which is undefined. Clamping passes NaN straight
-  through (every comparison is false), and under `REPEAT` an infinite UV becomes NaN in
-  `value - floorf(value)`. Today the callers filter NaN UVs before they get here, so nothing reaches
-  it; the function should not rely on that.
+Nothing open. Tier 1 is next.
 
 ## Tier 1 — Splitting the engine from the game
 
@@ -227,6 +213,8 @@ on the hash has the reasoning, the measurements and what was verified.
 | No input state API | `kek_key_held`/`kek_key_pressed`/`kek_key_released` over three bitsets in `KEK_engine`, 192 bytes rather than the two sketched here: with only current and previous, a tap inside one frame is lost. Edges are cleared after the scene's update and on every scene switch, so each is seen by exactly one update. The entry scene dropped its own bitmask | `ffd9d95`, `9333d8e` |
 | Reserved identifiers | `_kek_*`, `_GAME_*` and `_fs_asset_*` claimed names the standard reserves. 27 names in 7 files, not every translation unit; the marker moved to the end (`kek_apply_scene_switch_`) and `bugprone-reserved-identifier` is back on | `583fc89` |
 | `KEK_POOL_MODEL_UVS_MAX` meant two things | It sized the per-face `face_textures`, but the loader checked it only against the distinct-UV count; with `UVS_MAX` below `FACES_MAX` a textured model wrote past its slot. `faces_count` is checked too, and a second engine build with small limits proves it under ASan | `89c8fb3` |
+| Backface cull overflowed `int` | `kek_area_triangle_signed` multiplied screen coordinates the near clip had put tens of thousands of pixels out. Wraparound hid it until twice the area passed `INT_MAX`: a wall 35 units off and ~80 tall, not the 18 estimated here, and the back of it drew 2761 pixels. Edge form in `double` | `b51c188` |
+| `kek_texture_sample` cast NaN | The clamp let NaN through and `REPEAT` made NaN of infinity; both reached a `(uint16_t)` cast. NaN now resolves to 0 in both modes | `470d233` |
 
 ### Tier 3
 

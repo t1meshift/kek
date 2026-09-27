@@ -31,7 +31,7 @@ cmake --build build
 
 Targets: `kek` (engine), `SnusShooter` (game logic), `kek_editor` (editor), and `SnusShooter_sdl` (the playable executable).
 
-`-Wall -Wextra -Wpedantic` (`/W4` on MSVC) are on for everything but the vendored Dear ImGui. `-DKEK_WERROR=ON` turns them into errors; `.github/workflows/native.yml` builds that way on Linux GCC, Linux Clang and Windows MSVC, and runs `clang-tidy` as a separate non-blocking job.
+`-Wall -Wextra -Wpedantic` (`/W4` on MSVC) are on for everything but the vendored Dear ImGui. `-DKEK_WERROR=ON` turns them into errors; `.github/workflows/native.yml` builds that way on Linux GCC, Linux Clang and Windows MSVC, and runs `clang-tidy` as a separate job, pinned to one LLVM release, where any finding fails the build.
 
 The engine's unit tests live in `tests/`, on [Unity](https://github.com/ThrowTheSwitch/Unity) (fetched like the other dependencies) and CTest. They build by default everywhere but the browser; `-DKEK_BUILD_TESTS=OFF` skips them.
 

@@ -4,11 +4,10 @@
 # leading -* and an explicit opt-in list, then a list of subtractions with a
 # reason for each.
 #
-# The tree is clean against this set. CI still runs it as a continue-on-error
-# job, because the runner's clang-tidy version drifts and a newer one can add
-# checks to bugprone-* or cert-* overnight. Making it blocking is two lines —
-# WarningsAsErrors: '*' here and dropping continue-on-error in native.yml —
-# and is a call about how much version drift should be allowed to stop a merge.
+# The tree is clean against this set, and CI holds it there: any finding is an
+# error and fails the merge. That is safe only because CI's clang-tidy version
+# is pinned (see the tidy job in native.yml) — a newer release adds checks to
+# bugprone-* and cert-* without asking. Moving to one is its own commit.
 Checks: >
   -*,
   bugprone-*,
@@ -51,7 +50,7 @@ Checks: >
 
 HeaderFilterRegex: '.*/(kek|game|platform)/.*\.h$'
 
-WarningsAsErrors: ''
+WarningsAsErrors: '*'
 
 CheckOptions:
   # An explicit (void) is the C way of writing "I know, and I do not care

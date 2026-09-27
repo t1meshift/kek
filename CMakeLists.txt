@@ -35,6 +35,7 @@ else()
   set(KEK_DESKTOP_DEFAULT OFF)
 endif()
 option(KEK_BUILD_TESTS "Build the engine's unit tests (tests/) and register them with CTest" ${KEK_DESKTOP_DEFAULT})
+option(KEK_BUILD_BENCH "Build the benchmarks (bench/)" ${KEK_DESKTOP_DEFAULT})
 option(KEK_BUILD_DEMO "Build the demo (demo/) against this tree's kek" ${KEK_IS_TOP_LEVEL})
 option(KEK_BUILD_EDITOR "Build the editor (tools/kek_editor/) against this tree's kek" ${KEK_DESKTOP_DEFAULT})
 option(KEK_INSTALL "Generate install rules for kek and its CMake package" ${KEK_IS_TOP_LEVEL})
@@ -217,6 +218,11 @@ endif()
 ######## Tests ########
 if(KEK_BUILD_TESTS)
   add_subdirectory(tests)
+endif()
+
+######## Benchmarks ########
+if(KEK_BUILD_BENCH)
+  add_subdirectory(bench)
 endif()
 
 ######## Consumers ########

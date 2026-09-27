@@ -158,7 +158,7 @@ jobs:
         run: |
           status=0
           run-clang-tidy-${CLANG_TIDY_VERSION} -p build -quiet \
-            '^${{ github.workspace }}/(kek|demo|tools|tests)/' \
+            '^${{ github.workspace }}/(kek|demo|tools|tests|bench)/' \
             > tidy.log 2>&1 || status=$?
           cat tidy.log
           echo "### clang-tidy ${CLANG_TIDY_VERSION}: $(grep -cE ': (warning|error): ' tidy.log) findings" >> "$GITHUB_STEP_SUMMARY"

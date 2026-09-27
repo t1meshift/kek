@@ -38,6 +38,12 @@ The engine's unit tests live in `tests/`, on [Unity](https://github.com/ThrowThe
 ctest --test-dir build --output-on-failure
 ```
 
+`bench/` times the rasterisers scene by scene and prints a checksum of each scene's last frame; it builds wherever the tests do, `-DKEK_BUILD_BENCH=OFF` skips it. Build it in Release for numbers that mean anything, and pin it to one core:
+
+```sh
+taskset -c 2 ./build/Release/kek_bench_raster 300
+```
+
 The demo resolves assets against the working directory, so run it from its output directory:
 
 ```sh

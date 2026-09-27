@@ -37,17 +37,20 @@ keeps no storage of its own: everything is in the block the application hands `k
 ## Tier 2 — Target machine: Pentium, running on a 486DX
 
 Budget: fit comfortably into ~4 MB including assets. The worst-case pools are gone (`16ffe9d`) and
-depth is 16 bits (`6da6808`): a 320×200 engine is a block of `KEK_MEMORY_SIZE(320, 200)` = 201,487
-bytes on a 64-bit build and 198,927 on a 32-bit one, plus whatever the application gives its arena.
+depth is 16 bits (`6da6808`): a 320×200 engine is a block of `KEK_MEMORY_SIZE(320, 200)` = 202,527
+bytes on a 64-bit build and 199,711 on a 32-bit one, plus whatever the application gives its arena.
 Nearly all of it is the frame:
 
 | | Bytes |
 | --- | --- |
 | Depth buffer, `uint16_t` | 128,000 |
 | Framebuffer | 64,000 |
-| Handle tables, 64 + 64 slots | 6,656 (64-bit), 4,096 (32-bit) |
+| Handle tables, 64 + 64 slots | 8,192 (64-bit), 5,376 (32-bit) |
 | Palette + shading palette | 1,792 |
-| Default cube and texture, in a 1,024 reserve | 832 |
+| Default cube and texture | 528 |
+
+Models are a byte an axis per vertex and share their UVs as the file does (`fb92a44`): the demo's cat
+is 11,776 bytes in the arena, not counting its texture.
 
 Speed: 20–30 fps at 320×200 on a Pentium 100 is within reach of plain C, and the target for the pixel
 loop is ~40 cycles. Measured on 86Box with a standalone span loop (a full-screen wall, z = 1 to 6,
@@ -104,25 +107,11 @@ separates them, at ~8 seconds a frame in float, and it is not a target (see Sett
     has seven registers and the loop wants more than a dozen. Quake's was assembly. A pointer walked
     along the row instead of an index, or u and v packed into one register as some engines did for a
     fixed texture size, would each take a register back.
-- **UVs are the largest per-face array** — `needs a decision`. Indexed on disk, expanded in memory to
-  a `KEK_FVec2` per corner: 24 bytes per face, twice the face's own indices. The demo's cat has 608
-  faces and 361 UVs in the file, 344 of them used: 14,592 bytes as expanded, 6,536 indexed — the 361
-  at 8 bytes plus three `uint16` per face. The face indices are `uint32_t` where KMF's counts are
-  16-bit, so `uint16_t` there takes another 3,648: the cat from 26,288 bytes in memory to 14,584.
-  The cost is a lookup per corner, beside ~157 cycles to transform a vertex.
-- **Quantise vertices** — `needs a decision`. Quake's MDL format stored positions as `uint8` with a
-  per-model scale and offset — four times smaller than float, 948 bytes for the cat instead of 3,792.
-  The transform takes them back to float with a multiply and an add it can fold into the model's
-  matrix. But the cat is 4.2 units long, so a step is 0.017 of a unit, and at the benchmark's cube
-  distance of 1.4 half a step is about a pixel: vertices would visibly swim as a model turns close up,
-  as Quake's did. `uint16` is half of float with no visible error; level geometry, when there is some,
-  wants float or 16 bits in any case.
 - **Order of work.** Done: the arena for Tier 1, the per-pixel divides (`0945961`), 16-bit depth
-  (`6da6808`) and the scanline rasteriser (`035fd37`). The two data-structure items are what remain,
-  and they wait on a call. What is left of the span is the rest of the speed budget: a full-screen
-  textured wall is 38 ms on the Pentium, ~26 fps before geometry, overdraw and the game, where the
-  table's loop would be ~26 ms. Fixed point across the engine is no longer on the list (see Settled
-  decisions).
+  (`6da6808`), the scanline rasteriser (`035fd37`) and the models' storage (`fb92a44`). What is left
+  of the span is the rest of the speed budget: a full-screen textured wall is 38 ms on the Pentium,
+  ~26 fps before geometry, overdraw and the game, where the table's loop would be ~26 ms. Fixed point
+  across the engine is no longer on the list (see Settled decisions).
 
 ## Tier 3 — Engine: prerequisites for levels
 
@@ -200,7 +189,9 @@ rendering is a single hardcoded `kek_3d_draw_model` call.
   flags}` and a draw pass over it, following the existing `KEK_ModelPool` pattern.
 - The `.klf` format, magic `KLVL`: header, model table (paths), instance table (transform plus model
   index), camera spawn, and the light: per-vertex shade for level geometry, a light per zone, fog. Same
-  discipline as KMF — fixed-size records, bounds-checked, no allocation.
+  discipline as KMF — fixed-size records, bounds-checked, no allocation. Level geometry wants more
+  than a model's byte an axis (`fb92a44`): across a room 64 units wide a step is a quarter of a unit,
+  and seams between pieces would open. Float, or 16 bits over the level's box.
   Specified in [docs/formats.md](docs/formats.md), which has a stub section waiting for it.
 - **Lighting a level.** The light from `424f69e` is one sun plus ambient, which suits models and
   outdoor scenes, not rooms. Indoors:
@@ -329,6 +320,7 @@ on the hash has the reasoning, the measurements and what was verified.
 | Worst-case slots | A model slot was 87,136 bytes whatever it held and a texture slot 65,560, ×90 and ×256 the defaults. A two-ended arena in the rest of the block: assets sized exactly from the low end, temporaries from the high end, a footer per block so that a destroy in any order gives the memory back once what is above it has gone, and `kek_arena_mark`/`kek_arena_release` for a level's lifetime. `kek_model_create` and `kek_texture_create` take sizes. Generations are unchanged | `16ffe9d` |
 | Normals nobody read | `KEK_model_face_normal` was 36 bytes per face, 432 of the default cube's 1,264, and neither drawing nor lighting read it. Gone from the model; the KMF loader checks normal indices and reads past the normals without staging them. The builtin reserve went from 2,048 to 1,024 with it | `01673ea` |
 | Bounding-box rasterisers | Both walked every pixel of a triangle's box with float edge functions, stepped float attributes through memory on x87 and sampled through a call per pixel: ~15× the standalone span loop. Edges walked row by row in exact integers, a span loop in 16.15 depth and 16.16 texels with masked wrap, perspective every 16 pixels. The benchmark's textured wall from ~1,290 cycles a pixel to ~130 on the 486, ~590 to ~57 on the Pentium; coverage the same, pixel for pixel | `035fd37` |
+| UVs the largest per-face array | UVs expanded to a float pair per corner of every face, 24 bytes a face, vertices a float triple, faces three `uint32_t`. UVs indexed as the file has them, vertices a byte an axis with a per-model scale and offset as in Quake's MDL, 16-bit indices: the demo's cat from 26,304 bytes to 11,776. Vertices move by up to half a step as a model turns, which is accepted | `fb92a44` |
 
 ### Tier 3
 

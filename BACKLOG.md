@@ -20,34 +20,25 @@ These shape several items below, so they are recorded once here.
 | Level format | `.klf`, magic `KLVL`, by analogy with `.kmf`/`KMDL` and `.kif`/`KIMG` |
 | Audio | Own format, most likely sound banks |
 | 2D coordinates | Screen pixels. `kek_2d_triangle` overflows `int` past ~46,000 px on both axes and stays that way: no screen-space caller gets near it. Noted in [kek_2d.h](kek/include/kek_2d.h) |
+| Handle generations | 16 bits per slot, so a stale handle comes back to life after 65,536 reuses of one slot. That is 256 times what San Andreas allowed itself, for far smaller pools; not worth widening |
 
 ## Tier 0 — Foundation
 
-- **No input state API.** The engine only delivers `key_down`/`key_up` events, so every scene keeps its own
-  bitmask — see `_GAME_EntryScene_Movement` at
-  [game_scene_entry.c#L15](game/game_scene_entry.c#L15). Two bitsets over `KEK_SCANCODE_SIZE = 512`
-  (current and previous frame, for edge detection) cost 128 bytes against the ~2.6 MB already in BSS, so
-  static memory is not an argument against it. Mouse and gamepad later.
+- **`kek_area_triangle_signed` multiplies screen coordinates in `int`**
+  ([kek_math.c](kek/kek_math.c)), and `kek_3d_draw_model` calls it for the backface cull after the
+  near-plane clip. A vertex put on the near plane projects far off screen: with the default camera
+  (fov 75, near 0.1, 320×200) each world unit of offset there is ~1300 px, so a wall some 35 units to the
+  side and 18 tall that runs past the camera takes the products past `INT_MAX`. The lateral cull does not
+  stop it, since the far end of the wall is on screen. The sign of the area is then garbage and the wall
+  can flicker between culled and drawn. Worked out from the projection, not yet reproduced under UBSan.
+  Converting to `float` before multiplying is the whole fix — the function already returns `float` —
+  plus a test through `kek_3d_draw_model` with a large polygon across the near plane. The rasterizers
+  themselves are safe: their edge functions are `float`.
 
-- **`KEK_POOL_MODEL_UVS_MAX` means two things.** The pool sizes `face_textures` — one UV triple *per face*
-  — by it, and CMake describes it as "max textured faces", but `kek_file_model_load` checks it against
-  `uv_count`, the number of *distinct* UVs, and then writes `faces_count` entries into `face_textures`.
-  With the default config every limit is 1024 and nothing happens. Configure `UVS_MAX` below
-  `FACES_MAX` and a textured model with more faces than `UVS_MAX` writes past the end of its slot's
-  array, into the next slot. The loader should check `faces_count` against it under `HAS_TEXTURE`, the
-  way it already checks the colour block. Found by reading, not by a test — the suite builds one
-  config — so it is recorded rather than fixed.
-
-- **Reserved identifiers throughout.** Every `_kek_*` and `_GAME_*` file-scope static claims a name the
-  standard reserves. `bugprone-reserved-identifier` is switched off in [.clang-tidy](.clang-tidy) with
-  that reasoning recorded: the finding is correct, but a rename touching every translation unit is its
-  own change and not something to smuggle in behind a linter. Do it deliberately or decide not to.
-
-- **`needs a decision`: should clang-tidy block a merge?** The tree is clean against the configured set,
-  so the only thing standing in the way is that the runner's clang-tidy version is not pinned and a
-  newer one can add a check to `bugprone-*` overnight. Making it blocking is two lines —
-  `WarningsAsErrors: '*'` in [.clang-tidy](.clang-tidy) and dropping `continue-on-error` in
-  [native.yml](.github/workflows/native.yml). Pinning the version instead is the third option.
+- **`kek_texture_sample` converts NaN to an integer**, which is undefined. Clamping passes NaN straight
+  through (every comparison is false), and under `REPEAT` an infinite UV becomes NaN in
+  `value - floorf(value)`. Today the callers filter NaN UVs before they get here, so nothing reaches
+  it; the function should not rely on that.
 
 ## Tier 1 — Splitting the engine from the game
 
@@ -232,6 +223,10 @@ on the hash has the reasoning, the measurements and what was verified.
 | No tests | Unity, fetched like SDL3 and ImGui, driven by CTest, one executable per suite, nothing that needs `fork`, SDL3 or a prebuilt library. Unit suites for the math, palette, line clipper and pools (public API only); KMF and KIF parsers against every truncation, bad magic and version, counts one past each limit and out-of-range indices, with a leak check after every rejection | `f2232be`, `1eefa93`, `3ace570` |
 | No in-memory `KEK_AssetProvider` | `kek/io/kek_asset_memory.c`: a table of `{path, bytes, size}` the caller owns, no stdio, no allocation | `9b8a5fa` |
 | Rendering untested | A guarded frame the engine renders into; the 2D and triangle hand passes as tests at two frame sizes, the depth test in both draw orders, `kek_texture_sample` at the edges under `CLAMP` and `REPEAT`, `kek_3d_clip_near` at 0, 3 and 4 plus a 5000-triangle sweep, and whole cubes through the near plane | `db60ba8` |
+| clang-tidy did not block | The job was `continue-on-error` because the runner's clang-tidy drifted. Pinned to `ubuntu-24.04` and clang-tidy 22 from apt.llvm.org, `WarningsAsErrors: '*'`; the step also reported `tee`'s exit status, so it could never have failed | `4b48250` |
+| No input state API | `kek_key_held`/`kek_key_pressed`/`kek_key_released` over three bitsets in `KEK_engine`, 192 bytes rather than the two sketched here: with only current and previous, a tap inside one frame is lost. Edges are cleared after the scene's update and on every scene switch, so each is seen by exactly one update. The entry scene dropped its own bitmask | `ffd9d95`, `9333d8e` |
+| Reserved identifiers | `_kek_*`, `_GAME_*` and `_fs_asset_*` claimed names the standard reserves. 27 names in 7 files, not every translation unit; the marker moved to the end (`kek_apply_scene_switch_`) and `bugprone-reserved-identifier` is back on | `583fc89` |
+| `KEK_POOL_MODEL_UVS_MAX` meant two things | It sized the per-face `face_textures`, but the loader checked it only against the distinct-UV count; with `UVS_MAX` below `FACES_MAX` a textured model wrote past its slot. `faces_count` is checked too, and a second engine build with small limits proves it under ASan | `89c8fb3` |
 
 ### Tier 3
 

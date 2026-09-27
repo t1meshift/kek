@@ -19,6 +19,7 @@ These shape several items below, so they are recorded once here.
 | Frame comparison | No golden images while rendering is float — see the transcendentals item in Tier 3 |
 | Level format | `.klf`, magic `KLVL`, by analogy with `.kmf`/`KMDL` and `.kif`/`KIMG` |
 | Audio | Own format, most likely sound banks |
+| 2D coordinates | Screen pixels. `kek_2d_triangle` overflows `int` past ~46,000 px on both axes and stays that way: no screen-space caller gets near it. Noted in [kek_2d.h](kek/include/kek_2d.h) |
 
 ## Tier 0 — Foundation
 
@@ -27,15 +28,6 @@ These shape several items below, so they are recorded once here.
   [game_scene_entry.c#L15](game/game_scene_entry.c#L15). Two bitsets over `KEK_SCANCODE_SIZE = 512`
   (current and previous frame, for edge detection) cost 128 bytes against the ~2.6 MB already in BSS, so
   static memory is not an argument against it. Mouse and gamepad later.
-
-- **`needs a decision`: `kek_2d_triangle` overflows `int` on large triangles.** Each span end is
-  `a.x + (c.x - a.x) * (y - a.y) / height` in `int`, so a triangle spanning more than ~46,000 pixels on
-  both axes is signed overflow — UBSan reports it with vertices at ±50000. The screen needs 320×200, but
-  nothing upstream bounds what reaches the primitive. Clip the triangle first, widen the product (a
-  64-bit multiply is not free on a 486), or document a coordinate range and assert it; fixed point will
-  have to answer the same question with less headroom. The test is in place and ignored:
-  `test_a_triangle_spanning_100000_pixels_fills_the_frame` in
-  [test_render_2d.c](tests/test_render_2d.c).
 
 - **`KEK_POOL_MODEL_UVS_MAX` means two things.** The pool sizes `face_textures` — one UV triple *per face*
   — by it, and CMake describes it as "max textured faces", but `kek_file_model_load` checks it against

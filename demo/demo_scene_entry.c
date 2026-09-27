@@ -30,6 +30,9 @@ static void DEMO_EntryScene_reset_(DEMO_EntryScene* s) {
     };
     s->camera = KEK_DEFAULT_CAMERA;
     s->elapsed = 0.f;
+    s->fps_frames = 0;
+    s->fps_seconds = 0.f;
+    s->fps = 0.f;
     s->model = KEK_MODEL_HANDLE_INVALID;
     s->texture = KEK_TEXTURE_HANDLE_INVALID;
 }
@@ -138,6 +141,17 @@ void DEMO_EntryScene_update(KEK_scene* scene, KEK_engine* e, float dt) {
     kek_add_fvec3(&s->camera.rotation, &rotate_vec);
 
     s->elapsed += dt_s;
+
+    /* One update per frame on both platforms, so updates counted over time
+       are frames per second. dt arrives clamped to KEK_MAX_FRAME_MS, so below
+       10 fps this reads high. */
+    s->fps_frames += 1;
+    s->fps_seconds += dt_s;
+    if (s->fps_seconds >= 0.5f) {
+        s->fps = (float)s->fps_frames / s->fps_seconds;
+        s->fps_frames = 0;
+        s->fps_seconds = 0.f;
+    }
 }
 
 void DEMO_EntryScene_render(KEK_scene* scene, KEK_engine* e) {
@@ -182,10 +196,11 @@ void DEMO_EntryScene_render(KEK_scene* scene, KEK_engine* e) {
     (void)snprintf(
         buf,
         128,
-        "x: %.02f\ny: %.02f\nz: %.02f",
+        "x: %.02f\ny: %.02f\nz: %.02f\nfps: %.1f",
         s->camera.position.x,
         s->camera.position.y,
-        s->camera.position.z
+        s->camera.position.z,
+        s->fps
     );
     kek_2d_text_5x8(e, &KEK_FONT_DEFAULT_5X8, (KEK_IVec2) { 30, 8 }, buf, 9);
 }

@@ -13,6 +13,10 @@ typedef struct DEMO_EntryScene {
     KEK_ModelHandle model;
     KEK_TextureHandle texture;
     float elapsed; /* seconds since the scene was entered */
+    /* Frames per second, counted over the last half second or so. */
+    int fps_frames;
+    float fps_seconds;
+    float fps;
 } DEMO_EntryScene;
 
 DEMO_EntryScene DEMO_EntryScene_init(void);

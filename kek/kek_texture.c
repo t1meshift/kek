@@ -3,8 +3,11 @@
 #include "kek_macro.h"
 #include "kek_texture.h"
 
+/* Written so that NaN fails the first test and comes out as 0: it compares
+   false with everything, and the cast in kek_texture_sample is undefined for
+   it. */
 static float kek_texture_clamp01_(float value) {
-    if (value < 0.f) {
+    if (!(value >= 0.f)) {
         return 0.f;
     }
     if (value > 1.f) {
@@ -28,8 +31,10 @@ static float kek_texture_resolve_uv_(const KEK_engine* e, float value) {
         mode = e->texture_warp_mode;
     }
 
+    /* Clamped after wrapping too: a wrapped value is already in [0, 1], but
+       an infinite one comes out of value - floorf(value) as NaN. */
     if (mode == KEK_TEXTURE_WARP_REPEAT) {
-        return kek_texture_wrap_repeat_(value);
+        return kek_texture_clamp01_(kek_texture_wrap_repeat_(value));
     }
 
     return kek_texture_clamp01_(value);

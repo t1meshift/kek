@@ -2,6 +2,7 @@
    A 4x2 texture so that a stride mix-up between width and height shows, and
    every texel distinct so that each answer names the texel it came from. */
 
+#include <math.h>
 #include "unity.h"
 #include "kek.h"
 #include "kek_texture.h"
@@ -121,6 +122,32 @@ void test_a_one_texel_texture_is_that_texel_everywhere(void) {
     }
 }
 
+/* NaN and infinity are not coordinates, and today the rasteriser filters NaN
+   UVs before it samples, but the function cannot lean on its callers for
+   that: converting NaN to an integer is undefined. NaN is taken to 0 and reads
+   the first texel of its row or column, under both modes. */
+void test_nan_and_infinity_read_the_first_texel(void) {
+    const float nan = NAN;
+    const float inf = INFINITY;
+    int mode;
+
+    for (mode = 0; mode < 2; ++mode) {
+        kek_texture_set_warp_mode(&e, mode ? KEK_TEXTURE_WARP_REPEAT : KEK_TEXTURE_WARP_CLAMP);
+        TEST_ASSERT_EQUAL_UINT8(0, sample(nan, nan));
+        TEST_ASSERT_EQUAL_UINT8(10, sample(nan, 0.75f));
+        TEST_ASSERT_EQUAL_UINT8(2, sample(0.625f, nan));
+    }
+
+    /* Infinity is only undefined after REPEAT turns it into NaN; CLAMP holds
+       it to the edge like any other large value. */
+    kek_texture_set_warp_mode(&e, KEK_TEXTURE_WARP_REPEAT);
+    TEST_ASSERT_EQUAL_UINT8(0, sample(inf, -inf));
+    TEST_ASSERT_EQUAL_UINT8(10, sample(-inf, 0.75f));
+    kek_texture_set_warp_mode(&e, KEK_TEXTURE_WARP_CLAMP);
+    TEST_ASSERT_EQUAL_UINT8(10, sample(-inf, inf));
+    TEST_ASSERT_EQUAL_UINT8(3, sample(inf, -inf));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_clamp_is_the_default);
@@ -133,5 +160,6 @@ int main(void) {
     RUN_TEST(test_repeat_just_below_zero_lands_on_the_last_texel);
     RUN_TEST(test_no_engine_means_clamp);
     RUN_TEST(test_a_one_texel_texture_is_that_texel_everywhere);
+    RUN_TEST(test_nan_and_infinity_read_the_first_texel);
     return UNITY_END();
 }

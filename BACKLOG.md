@@ -31,61 +31,25 @@ Nothing open. Tier 1 is next.
 
 ## Tier 1 — The engine as a library
 
-The library builds alone and installs as a package, and the demo builds against it in CI. What is left
-is the memory.
-
-- **The pools and two scratch buffers are still the library's own.** Both pools in
-  [kek_pool.c](kek/kek_pool.c), the view-space vertices in `kek_3d_draw_model` and the KMF loader's
-  staging area, sized by `KEK_*` compile definitions baked into the installed package, and shared by
-  every engine in the process: a second `kek_init` resets the first engine's pools. They go into the
-  block `kek_init` already takes, as the rest of it after the frame: that is Tier 2's arena item, done
-  next and ahead of the rest of Tier 2's order. The scratch buffers stop being buffers there —
-  temporary allocations off the top of the arena, released by mark, sized by the model actually in
-  hand instead of the worst case. `KEK_MEMORY_SIZE(w, h)` keeps its signature: the arena is whatever
-  the application adds on top.
+Nothing open. The library builds alone, installs as a package the demo builds against in CI, and
+keeps no storage of its own: everything is in the block the application hands `kek_init`.
 
 ## Tier 2 — Target machine: Pentium, running on a 486
 
-Budget: fit comfortably into ~4 MB including assets. The engine occupies ~2.6 MB today while holding
-roughly 20 KB of actual data.
+Budget: fit comfortably into ~4 MB including assets. The worst-case pools are gone (`16ffe9d`): a
+320×200 engine is a block of `KEK_MEMORY_SIZE(320, 200)` = 331,535 bytes on a 64-bit build and 328,463
+on a 32-bit one, plus whatever the application gives its arena. Nearly all of it is the frame:
 
 | | Bytes |
 | --- | --- |
-| Model pool, 16 slots | 1,394,176 |
-| Texture pool, 16 slots | 1,048,960 |
 | Depth buffer, `float` | 256,000 |
 | Framebuffer | 64,000 |
-| Palette + shading palette | 3,072 |
+| Handle tables, 64 + 64 slots | 7,680 (64-bit), 4,608 (32-bit) |
+| Default cube and texture, in a 2,048 reserve | 1,264 |
+| Palette + shading palette | 1,792 |
 
-- **Worst-case slots are the whole story.** A `KEK_ModelPoolSlot` is 87,136 bytes whatever it holds: 1024
-  vertices, 1024 faces, 1024 normals, 1024 colours, 1024 UVs. The built-in cube — 8 vertices, 12 faces,
-  [kek_model.c#L149](kek/kek_model.c#L149) — is 972 bytes of real data, an overhead of **×90**. A texture
-  slot is 65,560 bytes against 256 bytes for the default 16×16 texture, **×256**. Replace N worst-case
-  slots with one arena allocated sequentially with marks — the Quake `Hunk_Alloc` model, reset on
-  level change. The block is the application's (Tier 1), typically a static array of its own. This is
-  still "no dynamic allocation" in the sense the project means: a bump allocator over memory handed in
-  once, deterministic, no free list, no fragmentation.
-
-  The expensive part is the API, not the allocator. `kek_model_create(e)` hands back a worst-case slot;
-  an arena has to know the size up front, so it becomes `kek_model_create(e, verts, faces, flags)`. And
-  `kek_model_destroy` has no meaning in a bump allocator — there are 17 calls to the destroy functions,
-  6 in [kek_file_model.c](kek/kek_file_model.c), 6 in [kek_file_image.c](kek/kek_file_image.c), 2 in the
-  demo, and 3 in [kek_pool.c](kek/kek_pool.c) itself, where `kek_model_destroy` now releases a texture
-  the model owns. What rescues it: almost all of them are LIFO by construction, since the loaders free exactly what
-  they just built on an error path. So a two-ended arena with marks works — permanent data (default cube
-  and texture, fonts) from the low end, per-level data from the high end, released wholesale on level
-  change, plus `kek_arena_mark()`/`kek_arena_release(mark)`. `destroy` genuinely frees when the block is
-  the most recent allocation, which covers every loader error path without touching their logic, and
-  otherwise just invalidates the handle until the next reset. Handles with generation counters stay, and
-  matter *more* under an arena, not less: they are the only thing that turns a use-after-release into a
-  detectable error instead of a corrupted triangle three weeks later.
-
-  The pool tests from Tier 0 are in place, in [test_pool.c](tests/test_pool.c): public API only, no
-  slot, capacity or handle bit read, so the arena has to pass them unchanged. The parser suites check
-  after every failed load that both pools have the free capacity they had before, which is the same
-  property the loaders' LIFO error paths will rely on under marks.
 - **Normals are the largest array in the engine and nothing reads them.** `KEK_model_face_normal` is
-  3 × `KEK_FVec3` = 36 bytes per face, 36,864 bytes per slot — 42% of a model — and `kek_3d_draw_model`
+  3 × `KEK_FVec3` = 36 bytes per face — 432 of the default cube's 1,264 bytes — and `kek_3d_draw_model`
   never touches them. Lighting does not read them either: it derives the face normal from the vertices at
   draw time (`424f69e`). So the array can go outright rather than shrink, and the loader can stop
   expanding the indexed normals KMF stores (`KEK_FileModel_FaceVertex.normal`). If Gouraud ever comes
@@ -98,18 +62,19 @@ roughly 20 KB of actual data.
   nearly every public struct, plus [kek_3d.c](kek/kek_3d.c), [kek_2d.c](kek/kek_2d.c),
   [kek_math.c](kek/kek_math.c), the converters and the editor. On-disk formats can stay float and convert
   at load — the loader already visits every vertex.
-- **Order of work.** Remove the per-pixel divides and move depth to `uint16` first: both are worth doing
-  regardless of arithmetic. Then the arena and the data structures. Fixed point last — it is the most
-  cross-cutting change and far easier on top of structures that have already shrunk.
+- **Order of work.** The arena went first, for Tier 1. Next remove the per-pixel divides and move depth
+  to `uint16`: both are worth doing regardless of arithmetic, and depth is now three quarters of the
+  block. Then the data structures. Fixed point last — it is the most cross-cutting change and far easier
+  on top of structures that have already shrunk.
 
 ## Tier 3 — Engine: prerequisites for levels
 
-- **Render to texture**, once the arena is in. A `KEK_texture` is palette indices, a byte per pixel, the
+- **Render to texture.** The arena it waited for is in. A `KEK_texture` is palette indices, a byte per pixel, the
   same as the frame, so binding a texture's pixels as the frame for a while and drawing into it with
   the ordinary 2D and 3D calls gives security-camera monitors (the Build engine's `setviewtotile`) and
   model thumbnails in the editor. The projection already takes its aspect from `e->w`/`e->h`. Two
   things to get right: 3D needs a depth buffer the size of the texture, which should be a temporary
-  from the arena rather than the frame's own, since a scene half way through its main view has that
+  from the top of the arena (`kek_arena_temp`, internal today) rather than the frame's own, since a scene half way through its main view has that
   one half full; and textures are drawn before the view that shows them, or they show the last frame.
   Nothing about it needs a `KEK_frame` type up front: `fb`, `db`, `w` and `h` are already the bound
   frame, and a bind/restore pair of functions over them is the whole API.
@@ -262,6 +227,13 @@ on the hash has the reasoning, the measurements and what was verified.
 | Everything in one CMake project | The top-level CMakeLists built engine, game, platform layer and editor as one. It builds the library and its tests; the demo and the editor are projects of their own over `kek::kek`, and as someone's subdirectory kek builds the library alone | `8c104d4` |
 | Not installable | No install rules, no package. `cmake --install` and `find_package(kek)`; Native CI builds the demo against the install | `3b65957` |
 | Frame, depth and palettes in library statics | Sized by `KEK_BUFFER_WIDTH`/`HEIGHT`, which were baked into the package. `kek_init` takes a `KEK_desc` and one block from the application and lays all four out in it; `KEK_MEMORY_SIZE` sizes a static array for it | `747952e` |
+| Pools and scratch in library statics | Both pools, the KMF loader's staging and `kek_3d_draw_model`'s view-space vertices, sized by `KEK_POOL_*` limits baked into the package and shared by every engine in the process: a second `kek_init` reset the first one's pools. All of it is in the application's block now, as the arena and the handle tables; no `KEK_POOL_*` limit is left | `16ffe9d` |
+
+### Tier 2
+
+| | Was | Commit |
+| --- | --- | --- |
+| Worst-case slots | A model slot was 87,136 bytes whatever it held and a texture slot 65,560, ×90 and ×256 the defaults. A two-ended arena in the rest of the block: assets sized exactly from the low end, temporaries from the high end, a footer per block so that a destroy in any order gives the memory back once what is above it has gone, and `kek_arena_mark`/`kek_arena_release` for a level's lifetime. `kek_model_create` and `kek_texture_create` take sizes. Generations are unchanged | `16ffe9d` |
 
 ### Tier 3
 

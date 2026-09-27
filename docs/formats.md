@@ -75,8 +75,10 @@ primitive.
 
 Beyond the magic and the version: a zero vertex or face count; counts past the
 pool limits (`KEK_POOL_MODEL_VERTS_MAX` for vertices *and* normals,
-`KEK_POOL_MODEL_FACES_MAX`, `KEK_POOL_MODEL_UVS_MAX`, and
-`KEK_POOL_MODEL_COLORS_MAX` for the colour block); a texture name whose last
+`KEK_POOL_MODEL_FACES_MAX`, `KEK_POOL_MODEL_UVS_MAX` for `uv_count` and, when
+`HAS_TEXTURE` is set, for `faces_count` too — `face_textures` holds one UV
+triple per face, not per UV — and `KEK_POOL_MODEL_COLORS_MAX` for the colour
+block); a texture name whose last
 byte is not `\0` — its length needs no check, since a one-byte field cannot
 describe a name the 256-byte buffer will not hold; a file that ends early at
 any point; a face vertex index at or past `vertices_count`; a normal index that is

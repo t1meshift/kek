@@ -107,6 +107,11 @@ KEK_ModelHandle kek_file_model_load(KEK_engine *e, const char *path) {
         return KEK_MODEL_HANDLE_INVALID;
     }
 
+    /* hdr.uv_count here is bounded against the scratch uvs[] buffer below,
+       which KEK_POOL_MODEL_UVS_MAX sizes. A textured model's faces_count is
+       checked against the same limit further down, once HAS_TEXTURE is known
+       — that one guards face_textures in the pool slot, one UV triple per
+       face rather than per UV, and is not this check's job. */
     if (hdr.magic[0] != 'K' || hdr.magic[1] != 'M' || hdr.magic[2] != 'D' || hdr.magic[3] != 'L' ||
         hdr.version != 1 ||
         hdr.vertices_count == 0 || hdr.faces_count == 0 ||
@@ -242,7 +247,11 @@ KEK_ModelHandle kek_file_model_load(KEK_engine *e, const char *path) {
     if ((hdr.flags & KEK_FILEMODEL_HAS_TEXTURE) != 0) {
         KEK_TextureHandle texture_handle;
 
-        if (texture_name_size == 0) {
+        /* face_textures is one UV triple per face, sized by
+           KEK_POOL_MODEL_UVS_MAX same as the scratch uvs[] above; the loop
+           below writes faces_count entries into it, so faces_count needs the
+           same check the colour block already gets against its own limit. */
+        if (texture_name_size == 0 || hdr.faces_count > KEK_POOL_MODEL_UVS_MAX) {
             kek_asset_close(&stream);
             kek_model_destroy(e, model_handle);
             return KEK_MODEL_HANDLE_INVALID;

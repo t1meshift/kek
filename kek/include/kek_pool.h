@@ -26,6 +26,9 @@ typedef struct KEK_ModelPoolSlot {
     KEK_model_face faces[KEK_POOL_MODEL_FACES_MAX];
     KEK_model_face_normal face_normals[KEK_POOL_MODEL_FACES_MAX];
     uint8_t face_colors[KEK_POOL_MODEL_COLORS_MAX];
+    /* One UV triple per face, not per UV — kek_file_model_load checks a
+       textured model's faces_count against KEK_POOL_MODEL_UVS_MAX before it
+       writes here, the same limit that bounds a KMF's uv_count. */
     KEK_model_face_uv face_textures[KEK_POOL_MODEL_UVS_MAX];
 } KEK_ModelPoolSlot;
 

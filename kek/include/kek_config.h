@@ -45,6 +45,11 @@
 #define KEK_POOL_MODEL_COLORS_MAX 1024u
 #endif
 
+/* Bounds two things that happen to share a limit: the distinct UVs a KMF may
+   declare (the scratch buffer they are staged into in kek_file_model.c) and,
+   once a model is textured, its faces_count too — the pool's face_textures
+   array holds one UV triple per face, not per UV. Both are checked in
+   kek_file_model_load. */
 #ifndef KEK_POOL_MODEL_UVS_MAX
 #define KEK_POOL_MODEL_UVS_MAX 1024u
 #endif

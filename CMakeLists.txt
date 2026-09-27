@@ -109,7 +109,7 @@ set(KEK_TEXTURE_POOL_CAPACITY 16 CACHE STRING "Max pooled textures")
 set(KEK_POOL_MODEL_VERTS_MAX 1024 CACHE STRING "Max vertices per pooled model")
 set(KEK_POOL_MODEL_FACES_MAX 1024 CACHE STRING "Max faces per pooled model")
 set(KEK_POOL_MODEL_COLORS_MAX 1024 CACHE STRING "Max face colors per pooled model")
-set(KEK_POOL_MODEL_UVS_MAX 1024 CACHE STRING "Max textured faces per pooled model")
+set(KEK_POOL_MODEL_UVS_MAX 1024 CACHE STRING "Max UVs a KMF may declare, and max faces per pooled textured model")
 set(KEK_POOL_TEXTURE_PIXELS_MAX 65536 CACHE STRING "Max pixels per pooled texture")
 set(KEK_PALETTE_SHADING_LEVELS 4 CACHE STRING "Max shading levels")
 
@@ -157,7 +157,10 @@ function(kek_target_warnings target)
 endfunction()
 
 ######## KEK engine ########
-add_library(kek 
+# A variable rather than inline in add_library(), so tests/ can build a second
+# copy of the engine under different KEK_POOL_* limits (see
+# KEK_BUILD_TESTS below) without a second list to keep in sync.
+set(KEK_ENGINE_SOURCES
   kek/include/kek_asset.h
   kek/include/kek_asset_memory.h
   kek/include/kek_keyboard.h
@@ -189,7 +192,9 @@ add_library(kek
   kek/kek.c
   kek/io/kek_asset_memory.c
 )
-set_target_properties(kek PROPERTIES 
+
+add_library(kek ${KEK_ENGINE_SOURCES})
+set_target_properties(kek PROPERTIES
   C_STANDARD 99
   C_STANDARD_REQUIRED ON
   C_EXTENSIONS OFF
@@ -351,6 +356,51 @@ endif() # NOT EMSCRIPTEN
 
 ######## Tests ########
 if(KEK_BUILD_TESTS)
+  # test_file_model_uv_overflow needs KEK_POOL_MODEL_UVS_MAX below
+  # KEK_POOL_MODEL_FACES_MAX, to get a faces_count that clears FACES_MAX but
+  # not UVS_MAX — the case BACKLOG.md's "KEK_POOL_MODEL_UVS_MAX means two
+  # things" describes, which the default config (every KEK_POOL_* limit the
+  # same 1024) cannot produce. Those limits are PUBLIC compile definitions on
+  # `kek`, so a test executable cannot override them per-TU while linking the
+  # shared library; a second, small static build of the whole engine from the
+  # same KEK_ENGINE_SOURCES is the least invasive way to get one binary under
+  # different limits without duplicating the source list. KEK_MODEL_POOL_CAPACITY
+  # is cut to 2 as well — one slot for the default cube kek_init() always
+  # creates, one for the test's model — so the test's model lands in the last
+  # slot of the pool's static storage and an overflow of its face_textures
+  # runs past the end of that whole array, where ASan's global-buffer-overflow
+  # check is guaranteed to catch it rather than just corrupting whatever pool
+  # slot happens to sit next door.
+  add_library(kek_test_small_uvs STATIC ${KEK_ENGINE_SOURCES})
+  set_target_properties(kek_test_small_uvs PROPERTIES
+    C_STANDARD 99
+    C_STANDARD_REQUIRED ON
+    C_EXTENSIONS OFF
+  )
+  kek_target_warnings(kek_test_small_uvs)
+  target_include_directories(kek_test_small_uvs PUBLIC
+    kek/include/
+  )
+  target_compile_definitions(kek_test_small_uvs PUBLIC
+    KEK_BUFFER_WIDTH=${KEK_BUFFER_WIDTH}u
+    KEK_BUFFER_HEIGHT=${KEK_BUFFER_HEIGHT}u
+    KEK_TARGET_FPS=${KEK_TARGET_FPS}u
+    KEK_MODEL_POOL_CAPACITY=2
+    KEK_TEXTURE_POOL_CAPACITY=${KEK_TEXTURE_POOL_CAPACITY}
+    KEK_POOL_MODEL_VERTS_MAX=${KEK_POOL_MODEL_VERTS_MAX}
+    KEK_POOL_MODEL_FACES_MAX=${KEK_POOL_MODEL_FACES_MAX}
+    KEK_POOL_MODEL_COLORS_MAX=${KEK_POOL_MODEL_COLORS_MAX}
+    # Above KEK_CUBE_MODEL.textures_count (12, kek_model.c) or kek_pool_init's
+    # clone of the default cube fails outright; still comfortably below
+    # KEK_POOL_MODEL_FACES_MAX.
+    KEK_POOL_MODEL_UVS_MAX=16
+    KEK_POOL_TEXTURE_PIXELS_MAX=${KEK_POOL_TEXTURE_PIXELS_MAX}
+    KEK_PALETTE_SHADING_LEVELS=${KEK_PALETTE_SHADING_LEVELS}
+  )
+  if(UNIX)
+    target_link_libraries(kek_test_small_uvs PUBLIC m)
+  endif()
+
   add_subdirectory(tests)
 endif()
 

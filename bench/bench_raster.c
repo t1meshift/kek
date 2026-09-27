@@ -14,7 +14,10 @@
    is not can be measured. --dump writes those last frames, one after another,
    raw, for comparing two builds byte by byte.
 
-       kek_bench_raster [frames] [--dump FILE]
+       kek_bench_raster [frames] [--dump FILE] [--assets DIR]
+
+   DIR holds the demo's cat.kmf and Dingus.kif; without it the scenes that
+   draw the cat are skipped.
 
    frames per round, default 100. */
 
@@ -23,7 +26,10 @@
 #include <string.h>
 #include <time.h>
 #include "kek.h"
+#include "kek_2d.h"
 #include "kek_3d.h"
+#include "kek_asset_memory.h"
+#include "kek_file_model.h"
 #include "kek_model.h"
 #include "kek_texture.h"
 
@@ -40,7 +46,8 @@ uclock_t uclock(void);
 #define BENCH_SECONDS() ((double)clock() / (double)CLOCKS_PER_SEC)
 #endif
 
-static unsigned char memory[KEK_MEMORY_SIZE(BENCH_W, BENCH_H) + (size_t)64u * 1024u];
+/* Room for the cat, its 256x256 texture, and the staging to load them. */
+static unsigned char memory[KEK_MEMORY_SIZE(BENCH_W, BENCH_H) + (size_t)256u * 1024u];
 static KEK_engine e;
 static KEK_model flat_cube;
 
@@ -125,19 +132,115 @@ static void scene_cube_fog(int frame) {
     kek_3d_set_fog(&e, 0.f, 0.f);
 }
 
+/* The demo's cat, when --assets names the directory it is in, drawn as the
+   demo draws it and then taken apart: behind the camera, where every face is
+   transformed, lit and clipped away, so what is left is the per-vertex and
+   per-face work; and far off, a few hundred pixels, where it is the setup of
+   each triangle and row. The files are read with stdio into memory and
+   handed to the engine through the in-memory provider, so the library still
+   sees no file system. */
+#define BENCH_CAT_FILE_MAX ((size_t)32u * 1024u)
+#define BENCH_TEXTURE_FILE_MAX ((size_t)80u * 1024u)
+
+static unsigned char cat_file[BENCH_CAT_FILE_MAX];
+static unsigned char texture_file[BENCH_TEXTURE_FILE_MAX];
+static KEK_MemoryAsset cat_assets[2];
+static KEK_MemoryAssetProvider cat_provider;
+static KEK_model* cat;
+
+/* dir/name into buffer, or 0 if it cannot be read or does not fit. */
+static size_t read_file(const char* dir, const char* name, unsigned char* buffer, size_t capacity) {
+    char path[512];
+    FILE* file;
+    size_t size;
+
+    if ((size_t)snprintf(path, sizeof(path), "%s/%s", dir, name) >= sizeof(path)) {
+        return 0;
+    }
+    file = fopen(path, "rb");
+    if (!file) {
+        return 0;
+    }
+    size = fread(buffer, 1, capacity, file);
+    if (size == capacity || ferror(file)) {
+        size = 0;
+    }
+    (void)fclose(file);
+    return size;
+}
+
+/* The texture's name is the one cat.kmf gives. */
+static void load_cat(const char* dir) {
+    cat_assets[0].path = "cat.kmf";
+    cat_assets[0].bytes = cat_file;
+    cat_assets[0].size = read_file(dir, "cat.kmf", cat_file, sizeof(cat_file));
+    cat_assets[1].path = "Dingus.kif";
+    cat_assets[1].bytes = texture_file;
+    cat_assets[1].size = read_file(dir, "Dingus.kif", texture_file, sizeof(texture_file));
+    if (cat_assets[0].size == 0 || cat_assets[1].size == 0) {
+        return;
+    }
+    kek_asset_memory_init(&cat_provider, cat_assets, 2);
+    e.assets = &cat_provider.base;
+    cat = kek_model_get(&e, kek_file_model_load(&e, "cat.kmf"));
+}
+
+/* The demo's view: the default camera, the cat turning in front of it, fog
+   from 6 to 25. */
+static void draw_cat(int frame, float z) {
+    KEK_camera camera = KEK_DEFAULT_CAMERA;
+
+    kek_3d_set_fog(&e, 6.f, 25.f);
+    kek_3d_draw_model(&e, cat, &camera, (KEK_FVec3){ 0.f, -1.f, z },
+                      (KEK_FVec3){ 0.f, (float)frame * 0.05f, 0.f });
+    kek_3d_set_fog(&e, 0.f, 0.f);
+}
+
+static void scene_cat(int frame) {
+    draw_cat(frame, 4.5f);
+}
+
+static void scene_cat_behind(int frame) {
+    draw_cat(frame, -4.5f);
+}
+
+static void scene_cat_far(int frame) {
+    draw_cat(frame, 30.f);
+}
+
+/* The demo's 2D over the 3D: a palette strip with its numbers and the
+   camera's position. */
+static void scene_overlay(int frame) {
+    char text[128];
+    int i;
+
+    for (i = 0; i < 16; ++i) {
+        (void)snprintf(text, sizeof(text), "%d", i);
+        kek_2d_rect(&e, (KEK_IVec2){ 0, i * 8 }, (KEK_IVec2){ 8, (i + 1) * 8 }, (uint8_t)i);
+        kek_2d_text_5x8(&e, &KEK_FONT_DEFAULT_5X8, (KEK_IVec2){ 10, i * 8 }, text, 15);
+    }
+    (void)snprintf(text, sizeof(text), "x: %.02f\ny: %.02f\nz: %.02f", (double)frame, 0., 0.);
+    kek_2d_text_5x8(&e, &KEK_FONT_DEFAULT_5X8, (KEK_IVec2){ 30, 8 }, text, 9);
+}
+
 typedef struct Scene {
     const char* name;
     void (*draw)(int frame);
+    int needs_cat;
 } Scene;
 
 static const Scene SCENES[] = {
-    { "clear only", scene_clear },
-    { "flat quad", scene_flat_quad },
-    { "textured quad", scene_textured_quad },
-    { "textured quad, shaded", scene_textured_quad_shaded },
-    { "cube, flat", scene_cube_flat },
-    { "cube, textured", scene_cube_textured },
-    { "cube, textured, fog", scene_cube_fog }
+    { "clear only", scene_clear, 0 },
+    { "flat quad", scene_flat_quad, 0 },
+    { "textured quad", scene_textured_quad, 0 },
+    { "textured quad, shaded", scene_textured_quad_shaded, 0 },
+    { "cube, flat", scene_cube_flat, 0 },
+    { "cube, textured", scene_cube_textured, 0 },
+    { "cube, textured, fog", scene_cube_fog, 0 },
+    { "demo's 2D overlay", scene_overlay, 0 },
+    { "cat, as in the demo", scene_cat, 1 },
+    { "cat, behind the camera", scene_cat_behind, 1 },
+    { "cat, far off", scene_cat_far, 1 }
 };
 
 static uint32_t checksum(void) {
@@ -176,6 +279,7 @@ static int parse_frames(const char* text) {
 int main(int argc, char** argv) {
     const KEK_desc desc = { .width = BENCH_W, .height = BENCH_H };
     const char* dump_path = 0;
+    const char* assets_dir = 0;
     FILE* dump = 0;
     int frames = 100;
     size_t s;
@@ -184,10 +288,12 @@ int main(int argc, char** argv) {
     for (i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--dump") == 0 && i + 1 < argc) {
             dump_path = argv[++i];
+        } else if (strcmp(argv[i], "--assets") == 0 && i + 1 < argc) {
+            assets_dir = argv[++i];
         } else if (parse_frames(argv[i]) > 0) {
             frames = parse_frames(argv[i]);
         } else {
-            (void)fprintf(stderr, "usage: %s [frames] [--dump FILE]\n", argv[0]);
+            (void)fprintf(stderr, "usage: %s [frames] [--dump FILE] [--assets DIR]\n", argv[0]);
             return 2;
         }
     }
@@ -201,6 +307,13 @@ int main(int argc, char** argv) {
     flat_cube.face_uvs = 0;
     flat_cube.uvs_count = 0;
     flat_cube.face_uvs_count = 0;
+    if (assets_dir) {
+        load_cat(assets_dir);
+        if (!cat) {
+            (void)fprintf(stderr, "cannot load the cat from %s\n", assets_dir);
+            return 1;
+        }
+    }
     if (dump_path) {
         dump = fopen(dump_path, "wb");
         if (!dump) {
@@ -214,6 +327,11 @@ int main(int argc, char** argv) {
     for (s = 0; s < sizeof(SCENES) / sizeof(SCENES[0]); ++s) {
         double best = -1.;
         int round;
+
+        if (SCENES[s].needs_cat && !cat) {
+            (void)printf("%-24s %10s\n", SCENES[s].name, "no --assets");
+            continue;
+        }
 
         for (round = 0; round < BENCH_ROUNDS; ++round) {
             double start = BENCH_SECONDS();

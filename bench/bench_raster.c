@@ -2,6 +2,9 @@
 
    Plain C99 over the library and nothing else: timing is clock(), so the same
    file builds for the target and runs under an emulator or on the machine.
+   Under DJGPP it is uclock() instead, which reads the timer chip to the
+   microsecond: DOS's clock() ticks every 55 ms, which is a tenth of what a
+   change to the span loop moves.
    Each scene draws the same frames every round, clearing the frame first, and
    the fastest of the rounds is reported: on a desktop the slower ones are
    other processes, not the code.
@@ -27,6 +30,15 @@
 #define BENCH_W 320
 #define BENCH_H 200
 #define BENCH_ROUNDS 5
+
+#ifdef __DJGPP__
+/* <time.h> declares these only outside strict C99, which is how this builds. */
+typedef long long uclock_t;
+uclock_t uclock(void);
+#define BENCH_SECONDS() ((double)uclock() / 1193180.)
+#else
+#define BENCH_SECONDS() ((double)clock() / (double)CLOCKS_PER_SEC)
+#endif
 
 static unsigned char memory[KEK_MEMORY_SIZE(BENCH_W, BENCH_H) + (size_t)64u * 1024u];
 static KEK_engine e;
@@ -204,7 +216,7 @@ int main(int argc, char** argv) {
         int round;
 
         for (round = 0; round < BENCH_ROUNDS; ++round) {
-            clock_t start = clock();
+            double start = BENCH_SECONDS();
             double ms;
             int frame;
 
@@ -212,7 +224,7 @@ int main(int argc, char** argv) {
                 kek_flush_buffers(&e);
                 SCENES[s].draw(frame);
             }
-            ms = (double)(clock() - start) * 1000. / (double)CLOCKS_PER_SEC / (double)frames;
+            ms = (BENCH_SECONDS() - start) * 1000. / (double)frames;
             if (best < 0. || ms < best) {
                 best = ms;
             }

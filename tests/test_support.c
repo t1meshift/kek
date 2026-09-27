@@ -4,11 +4,17 @@
 #include "kek_model.h"
 #include "kek_texture.h"
 
-void kek_test_init(KEK_engine* e) {
-    static unsigned char memory[KEK_MEMORY_SIZE(KEK_TEST_WIDTH, KEK_TEST_HEIGHT)];
-    const KEK_desc desc = { KEK_TEST_WIDTH, KEK_TEST_HEIGHT };
+void kek_test_init_arena(KEK_engine* e, size_t arena) {
+    static unsigned char memory[KEK_MEMORY_SIZE(KEK_TEST_WIDTH, KEK_TEST_HEIGHT) + KEK_TEST_ARENA];
+    const KEK_desc desc = { KEK_TEST_WIDTH, KEK_TEST_HEIGHT, 0, 0 };
 
-    TEST_ASSERT_TRUE_MESSAGE(kek_init(e, &desc, memory, sizeof(memory)), "kek_init failed");
+    TEST_ASSERT_TRUE_MESSAGE(arena <= KEK_TEST_ARENA, "test arena larger than its storage");
+    TEST_ASSERT_TRUE_MESSAGE(kek_init(e, &desc, memory, KEK_MEMORY_SIZE(KEK_TEST_WIDTH, KEK_TEST_HEIGHT) + arena),
+                             "kek_init failed");
+}
+
+void kek_test_init(KEK_engine* e) {
+    kek_test_init_arena(e, KEK_TEST_ARENA);
 }
 
 /* Far past any pool this engine configures; hitting it means the pool never
@@ -21,7 +27,7 @@ int kek_test_free_models(KEK_engine* e) {
     int i;
 
     while (count < KEK_TEST_MAX_HANDLES) {
-        KEK_ModelHandle handle = kek_model_create(e);
+        KEK_ModelHandle handle = kek_model_create(e, 0, 0, 0);
         if (handle == KEK_MODEL_HANDLE_INVALID) {
             break;
         }
@@ -41,7 +47,7 @@ int kek_test_free_textures(KEK_engine* e) {
     int i;
 
     while (count < KEK_TEST_MAX_HANDLES) {
-        KEK_TextureHandle handle = kek_texture_create(e);
+        KEK_TextureHandle handle = kek_texture_create(e, 1, 1);
         if (handle == KEK_TEXTURE_HANDLE_INVALID) {
             break;
         }

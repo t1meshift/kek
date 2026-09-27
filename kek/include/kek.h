@@ -7,6 +7,7 @@ extern "C" {
 
 #include <stddef.h>
 #include <stdint.h>
+#include "kek_arena.h"
 #include "kek_asset.h"
 #include "kek_config.h"
 #include "kek_palette.h"
@@ -42,6 +43,8 @@ struct KEK_engine {
     uint16_t w; /** buffer width */
     uint16_t h; /** buffer height */
     uint16_t target_fps;
+    /* The rest of the block: the pools' tables and everything in them. */
+    KEK_arena arena;
     KEK_ModelPool model_pool;
     KEK_TexturePool texture_pool;
     KEK_ModelHandle default_cube_model;
@@ -56,30 +59,50 @@ struct KEK_engine {
 typedef struct KEK_desc {
     uint16_t width;  /* of the frame, in pixels */
     uint16_t height;
+    /* How many models and textures can be alive at once: the size of the
+       handle tables, not of the arena. 0 means KEK_DEFAULT_MODELS and
+       KEK_DEFAULT_TEXTURES. The defaults take one of each. */
+    uint16_t models;
+    uint16_t textures;
 } KEK_desc;
 
+#define KEK_DEFAULT_MODELS 64u
+#define KEK_DEFAULT_TEXTURES 64u
+
 /* The application hands kek_init one block and the engine lays out its frame,
-   depth buffer and palettes inside it; where the block comes from — a static array, one malloc
-   at startup, a fixed region on a machine without either — is the
-   application's business. The block need not be aligned: the layout starts at
-   the first KEK_MEMORY_ALIGN boundary inside it, and the size accounts for
-   that.
+   depth buffer, palettes and handle tables inside it; where the block comes
+   from — a static array, one malloc at startup, a fixed region on a machine
+   without either — is the application's business. The block need not be
+   aligned: the layout starts at the first KEK_MEMORY_ALIGN boundary inside
+   it, and the size accounts for that.
 
-   KEK_MEMORY_SIZE is the same number as kek_memory_size, as a constant
-   expression for sizing a static array:
+   kek_memory_size is the least block kek_init takes, and all it holds beyond
+   the frame is the tables and the default cube and texture. Models and
+   textures come from whatever the application adds on top: that is the
+   arena, and its size is the budget for assets.
 
-       static unsigned char memory[KEK_MEMORY_SIZE(320, 200)];
+       static unsigned char memory[KEK_MEMORY_SIZE(320, 200) + 512 * 1024];
 
-   Its arguments are evaluated more than once. */
+   KEK_MEMORY_SIZE is kek_memory_size of a desc with the default table sizes,
+   as a constant expression for sizing a static array. Its arguments are
+   evaluated more than once. */
 #define KEK_MEMORY_ALIGN 16u
 #define KEK_MEMORY_ROUND_(n) \
     (((size_t)(n) + (KEK_MEMORY_ALIGN - 1u)) & ~(size_t)(KEK_MEMORY_ALIGN - 1u))
-#define KEK_MEMORY_SIZE(width, height) \
+/* Room for the default cube and texture, which kek_init creates in the arena.
+   test_memory proves it is enough. */
+#define KEK_MEMORY_BUILTIN_ 2048u
+#define KEK_MEMORY_SIZE_FOR_(width, height, models, textures) \
     ((size_t)(KEK_MEMORY_ALIGN - 1u) \
      + KEK_MEMORY_ROUND_((size_t)(width) * (size_t)(height)) \
      + KEK_MEMORY_ROUND_((size_t)(width) * (size_t)(height) * sizeof(float)) \
      + KEK_MEMORY_ROUND_(256u * sizeof(KEK_palette_item)) \
-     + KEK_MEMORY_ROUND_((size_t)256u * (size_t)KEK_PALETTE_SHADING_LEVELS))
+     + KEK_MEMORY_ROUND_((size_t)256u * (size_t)KEK_PALETTE_SHADING_LEVELS) \
+     + KEK_MEMORY_ROUND_((size_t)(models) * sizeof(KEK_ModelPoolSlot)) \
+     + KEK_MEMORY_ROUND_((size_t)(textures) * sizeof(KEK_TexturePoolSlot)) \
+     + (size_t)KEK_MEMORY_BUILTIN_)
+#define KEK_MEMORY_SIZE(width, height) \
+    KEK_MEMORY_SIZE_FOR_(width, height, KEK_DEFAULT_MODELS, KEK_DEFAULT_TEXTURES)
 
 size_t kek_memory_size(const KEK_desc* desc);
 
@@ -89,7 +112,6 @@ size_t kek_memory_size(const KEK_desc* desc);
    The engine points into the block from then on, so the block has to outlive
    it. The frame starts cleared and the palette is the default one. */
 int kek_init(KEK_engine* engine, const KEK_desc* desc, void* memory, size_t size);
-void kek_pool_init(KEK_engine* engine);
 
 void kek_set_palette(KEK_engine* e, const KEK_palette_item* palette);
 void kek_set_shading_palette(KEK_engine* e, const uint8_t* shading_palette);

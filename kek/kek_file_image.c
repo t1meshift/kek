@@ -36,13 +36,10 @@ KEK_TextureHandle kek_file_image_load(KEK_engine* e, const char* path) {
         return KEK_TEXTURE_HANDLE_INVALID;
     }
 
+    /* No limit of its own: what the arena cannot hold, kek_texture_create
+       refuses. */
     pixel_count = (size_t)hdr.width * (size_t)hdr.height;
-    if (pixel_count > KEK_POOL_TEXTURE_PIXELS_MAX) {
-        kek_asset_close(&stream);
-        return KEK_TEXTURE_HANDLE_INVALID;
-    }
-
-    handle = kek_texture_create(e);
+    handle = kek_texture_create(e, hdr.width, hdr.height);
     if (handle == KEK_TEXTURE_HANDLE_INVALID) {
         kek_asset_close(&stream);
         return KEK_TEXTURE_HANDLE_INVALID;
@@ -68,8 +65,6 @@ KEK_TextureHandle kek_file_image_load(KEK_engine* e, const char* path) {
             kek_texture_destroy(e, handle);
             return KEK_TEXTURE_HANDLE_INVALID;
         }
-        out_texture->width = hdr.width;
-        out_texture->height = hdr.height;
         return handle;
     }
 
@@ -101,8 +96,6 @@ KEK_TextureHandle kek_file_image_load(KEK_engine* e, const char* path) {
         }
 
         kek_asset_close(&stream);
-        out_texture->width = hdr.width;
-        out_texture->height = hdr.height;
         return handle;
     }
 

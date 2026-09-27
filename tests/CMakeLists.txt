@@ -20,17 +20,10 @@ target_include_directories(unity PUBLIC
 )
 
 # kek_add_test(<name> [extra sources...]) builds tests/<name>.c into an
-# executable of the same name and registers it with CTest, against the
-# engine built with the project's own KEK_POOL_* limits.
+# executable of the same name and registers it with CTest. Limits a test
+# needs smaller than usual — a full arena, a full handle table — it sets up
+# itself, through the KEK_desc and the block it hands kek_init.
 function(kek_add_test name)
-  kek_add_test_against(${name} kek ${ARGN})
-endfunction()
-
-# kek_add_test_against(<name> <lib> [extra sources...]) is the same, but
-# against a named engine library instead of `kek` — for test_file_model_uv_overflow,
-# which needs the smaller-limit kek_test_small_uvs from the top-level
-# CMakeLists.txt to reproduce a bug the default limits cannot.
-function(kek_add_test_against name lib)
   add_executable(${name} ${name}.c ${ARGN})
   set_target_properties(${name} PROPERTIES
     C_STANDARD 99
@@ -38,7 +31,7 @@ function(kek_add_test_against name lib)
     C_EXTENSIONS OFF
   )
   kek_target_warnings(${name})
-  target_link_libraries(${name} PRIVATE ${lib} unity)
+  target_link_libraries(${name} PRIVATE kek unity)
   add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
@@ -50,7 +43,6 @@ kek_add_test(test_2d_clip_line)
 kek_add_test(test_pool test_support.c)
 kek_add_test(test_file_image test_support.c)
 kek_add_test(test_file_model test_support.c)
-kek_add_test_against(test_file_model_uv_overflow kek_test_small_uvs test_support.c)
 kek_add_test(test_render_2d test_support.c)
 kek_add_test(test_render_3d test_support.c)
 kek_add_test(test_texture_sample test_support.c)

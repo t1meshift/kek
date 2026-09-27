@@ -56,7 +56,19 @@ struct KEK_model {
     uint32_t textures_count;
 };
 
-KEK_ModelHandle kek_model_create(KEK_engine* e);
+/* Which per-face arrays a model has beyond vertices, faces and normals. */
+#define KEK_MODEL_FACE_COLORS 1u
+#define KEK_MODEL_FACE_UVS 2u
+
+/* A model with room for exactly this many vertices and faces, zeroed, its
+   counts set to the sizes asked for: colors_count and textures_count are
+   faces_count when the flag is there and 0, with a null array, when it is
+   not. The storage comes from the engine's arena, all of it in one block, so
+   the sizes have to be known up front — there is no growing a model later.
+   KEK_MODEL_HANDLE_INVALID when the arena or the handle table is full. */
+KEK_ModelHandle kek_model_create(KEK_engine* e, uint32_t verts_count, uint32_t faces_count, unsigned flags);
+/* A model of the source's size with the source's contents. Counts past
+   faces_count for normals, colours or UVs are refused. */
 KEK_ModelHandle kek_model_clone(KEK_engine* e, const KEK_model* source);
 KEK_model* kek_model_get(KEK_engine* e, KEK_ModelHandle handle);
 void kek_model_destroy(KEK_engine* e, KEK_ModelHandle handle);

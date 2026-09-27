@@ -4,7 +4,9 @@
    Every rejection is also a leak check: a failed load must leave the model
    pool and the texture pool with exactly the free capacity they had before —
    the loader takes a model slot before it has finished validating, and a
-   texture slot on its way out, and both have to be given back on every path. */
+   texture slot on its way out, and both have to be given back on every path.
+   The arena has to have exactly the free bytes it had, too, which is also
+   what shows the staging taken from its top was given back on every path. */
 
 #include <math.h>
 #include <string.h>
@@ -23,9 +25,10 @@
 #define HAS_COLORS KEK_FILEMODEL_HAS_FACE_COLORS
 #define HAS_TEXTURE KEK_FILEMODEL_HAS_TEXTURE
 
-/* Room for one past every pool limit, so a count over the limit can come
-   with a complete body and the limit is the only thing left to refuse it. */
-#define BIG (KEK_POOL_MODEL_VERTS_MAX + KEK_POOL_MODEL_FACES_MAX + KEK_POOL_MODEL_UVS_MAX + 1)
+/* A large model: the most of everything a model used to be allowed before the
+   arena. BIG leaves room for one past it. */
+#define LARGE 1024
+#define BIG (2 * LARGE + 1)
 
 typedef struct Corner {
     uint16_t vertex, normal, uv;
@@ -61,6 +64,7 @@ static KEK_MemoryAsset assets[2];
 static KEK_MemoryAssetProvider provider;
 static int free_models;
 static int free_textures;
+static size_t free_bytes;
 
 static const uint8_t TEXTURE_PIXELS[2 * 2] = { 11, 12, 13, 14 };
 
@@ -187,7 +191,7 @@ static void bare_model(void) {
 }
 
 /* `vertices` vertices and `faces` faces, all over the first three, for the
-   pool-limit cases. */
+   cases that are about size. */
 static void large_model(uint16_t vertices, uint16_t faces) {
     uint16_t i;
 
@@ -202,8 +206,17 @@ static void large_model(uint16_t vertices, uint16_t faces) {
     }
 }
 
+/* An engine with an arena of `arena` bytes, the asset provider attached, and
+   the baseline every rejection is compared against. */
+static void start(size_t arena) {
+    kek_test_init_arena(&e, arena);
+    e.assets = &provider.base;
+    free_models = kek_test_free_models(&e);
+    free_textures = kek_test_free_textures(&e);
+    free_bytes = kek_arena_available(&e);
+}
+
 void setUp(void) {
-    kek_test_init(&e);
     assets[0].path = "model.kmf";
     assets[0].bytes = model_file.bytes;
     assets[0].size = 0;
@@ -211,12 +224,10 @@ void setUp(void) {
     assets[1].bytes = image_file.bytes;
     assets[1].size = 0;
     kek_asset_memory_init(&provider, assets, 2);
-    e.assets = &provider.base;
 
     good_model();
     write_kif();
-    free_models = kek_test_free_models(&e);
-    free_textures = kek_test_free_textures(&e);
+    start(KEK_TEST_ARENA);
 }
 
 void tearDown(void) {
@@ -230,6 +241,7 @@ static void assert_rejected_cleanly(KEK_ModelHandle handle) {
     TEST_ASSERT_EQUAL_UINT32(KEK_MODEL_HANDLE_INVALID, handle);
     TEST_ASSERT_EQUAL_INT_MESSAGE(free_models, kek_test_free_models(&e), "a failed load kept a model slot");
     TEST_ASSERT_EQUAL_INT_MESSAGE(free_textures, kek_test_free_textures(&e), "a failed load kept a texture slot");
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(free_bytes, kek_arena_available(&e), "a failed load kept arena memory");
 }
 
 static void write_and_reject(void) {
@@ -317,12 +329,13 @@ void test_a_textured_model_round_trips(void) {
     TEST_ASSERT_EQUAL_INT(free_textures - 1, kek_test_free_textures(&e));
 }
 
-void test_destroying_a_loaded_model_gives_back_both_slots(void) {
+void test_destroying_a_loaded_model_gives_back_both_slots_and_their_memory(void) {
     write_kmf();
     kek_model_destroy(&e, load());
 
     TEST_ASSERT_EQUAL_INT(free_models, kek_test_free_models(&e));
     TEST_ASSERT_EQUAL_INT(free_textures, kek_test_free_textures(&e));
+    TEST_ASSERT_EQUAL_size_t(free_bytes, kek_arena_available(&e));
 }
 
 void test_a_bare_model_loads_with_derived_normals(void) {
@@ -359,26 +372,65 @@ void test_uv_indices_are_ignored_without_a_texture(void) {
     TEST_ASSERT_NOT_EQUAL(KEK_MODEL_HANDLE_INVALID, load());
 }
 
-void test_a_model_at_every_pool_limit_loads(void) {
+void test_a_large_model_loads(void) {
     KEK_model* mdl;
 
-    large_model(KEK_POOL_MODEL_VERTS_MAX, KEK_POOL_MODEL_FACES_MAX);
-    kmf.normals_count = KEK_POOL_MODEL_VERTS_MAX;
+    large_model(LARGE, LARGE);
+    kmf.normals_count = LARGE;
     kmf.flags = HAS_COLORS;
     write_kmf();
 
     mdl = kek_model_get(&e, load());
     TEST_ASSERT_NOT_NULL(mdl);
-    TEST_ASSERT_EQUAL_UINT32(KEK_POOL_MODEL_VERTS_MAX, mdl->verts_count);
-    TEST_ASSERT_EQUAL_UINT32(KEK_POOL_MODEL_FACES_MAX, mdl->faces_count);
-    TEST_ASSERT_EQUAL_UINT32(KEK_POOL_MODEL_FACES_MAX, mdl->colors_count);
+    TEST_ASSERT_EQUAL_UINT32(LARGE, mdl->verts_count);
+    TEST_ASSERT_EQUAL_UINT32(LARGE, mdl->faces_count);
+    TEST_ASSERT_EQUAL_UINT32(LARGE, mdl->colors_count);
 }
 
-void test_the_uv_count_at_its_limit_loads(void) {
+/* face_textures holds a UV triple per face, not per UV. When one limit bounded
+   both, a textured model with more faces than that limit wrote past its slot
+   (89c8fb3). Now the array is sized by faces_count, whatever uv_count is. */
+void test_a_textured_model_with_more_faces_than_uvs_loads(void) {
+    KEK_model* mdl;
+    uint16_t i;
+
     good_model();
-    kmf.uv_count = KEK_POOL_MODEL_UVS_MAX;
+    kmf.faces_count = LARGE + 1;
+    kmf.uv_count = LARGE;
+    kmf.normals_count = 0;
+    kmf.flags = HAS_TEXTURE;
+    for (i = 0; i < LARGE; ++i) {
+        kmf.uvs[i] = (KEK_FVec2){ (float)i, 0.f };
+    }
+    for (i = 0; i < kmf.faces_count; ++i) {
+        set_face(i, corner(0, NONE, 0), corner(1, NONE, 1), corner(2, NONE, (uint16_t)(i % LARGE)));
+    }
+    write_kmf();
+
+    mdl = kek_model_get(&e, load());
+    TEST_ASSERT_NOT_NULL(mdl);
+    TEST_ASSERT_EQUAL_UINT32(LARGE + 1, mdl->textures_count);
+    assert_uv(0.f, 0.f, mdl->face_textures[LARGE].a);
+    assert_uv(1.f, 0.f, mdl->face_textures[LARGE].b);
+    assert_uv(0.f, 0.f, mdl->face_textures[LARGE].c); /* uv LARGE % LARGE */
+    assert_uv((float)(LARGE - 1), 0.f, mdl->face_textures[LARGE - 1].c);
+}
+
+/* The same whole file loads with room for it and is refused without: first
+   too little for even the staging, then enough for the staging but not for
+   the model on top of it. */
+void test_a_model_larger_than_the_arena_is_rejected(void) {
+    large_model(LARGE, LARGE);
+    kmf.normals_count = LARGE;
+    kmf.flags = HAS_COLORS;
     write_kmf();
     TEST_ASSERT_NOT_EQUAL(KEK_MODEL_HANDLE_INVALID, load());
+
+    start(4096);
+    assert_rejected_cleanly(load());
+
+    start(50000);
+    assert_rejected_cleanly(load());
 }
 
 /* ---- Files that do not ---- */
@@ -452,32 +504,6 @@ void test_zero_vertices_or_faces_are_rejected(void) {
 
     bare_model();
     kmf.faces_count = 0;
-    write_and_reject();
-}
-
-void test_vertices_past_the_pool_limit_are_rejected(void) {
-    large_model(KEK_POOL_MODEL_VERTS_MAX + 1, 2);
-    write_and_reject();
-}
-
-void test_faces_past_the_pool_limit_are_rejected(void) {
-    large_model(4, KEK_POOL_MODEL_FACES_MAX + 1);
-    write_and_reject();
-
-    large_model(4, KEK_POOL_MODEL_FACES_MAX + 1);
-    kmf.flags = HAS_COLORS;
-    write_and_reject();
-}
-
-void test_normals_past_the_pool_limit_are_rejected(void) {
-    large_model(4, 2);
-    kmf.normals_count = KEK_POOL_MODEL_VERTS_MAX + 1;
-    write_and_reject();
-}
-
-void test_uvs_past_the_pool_limit_are_rejected(void) {
-    good_model();
-    kmf.uv_count = KEK_POOL_MODEL_UVS_MAX + 1;
     write_and_reject();
 }
 
@@ -576,9 +602,10 @@ void test_null_arguments_are_rejected(void) {
 
 void test_a_full_model_pool_is_a_clean_failure(void) {
     write_kmf();
-    while (kek_model_create(&e) != KEK_MODEL_HANDLE_INVALID) {
+    while (kek_model_create(&e, 0, 0, 0) != KEK_MODEL_HANDLE_INVALID) {
     }
     free_models = 0;
+    free_bytes = kek_arena_available(&e);
     assert_rejected_cleanly(load());
 }
 
@@ -586,9 +613,10 @@ void test_a_full_model_pool_is_a_clean_failure(void) {
    path that has to hand it back. */
 void test_a_full_texture_pool_is_a_clean_failure(void) {
     write_kmf();
-    while (kek_texture_create(&e) != KEK_TEXTURE_HANDLE_INVALID) {
+    while (kek_texture_create(&e, 1, 1) != KEK_TEXTURE_HANDLE_INVALID) {
     }
     free_textures = 0;
+    free_bytes = kek_arena_available(&e);
     assert_rejected_cleanly(load());
 }
 
@@ -596,21 +624,18 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_the_documented_header_is_twenty_bytes);
     RUN_TEST(test_a_textured_model_round_trips);
-    RUN_TEST(test_destroying_a_loaded_model_gives_back_both_slots);
+    RUN_TEST(test_destroying_a_loaded_model_gives_back_both_slots_and_their_memory);
     RUN_TEST(test_a_bare_model_loads_with_derived_normals);
     RUN_TEST(test_uv_indices_are_ignored_without_a_texture);
-    RUN_TEST(test_a_model_at_every_pool_limit_loads);
-    RUN_TEST(test_the_uv_count_at_its_limit_loads);
+    RUN_TEST(test_a_large_model_loads);
+    RUN_TEST(test_a_textured_model_with_more_faces_than_uvs_loads);
+    RUN_TEST(test_a_model_larger_than_the_arena_is_rejected);
     RUN_TEST(test_every_truncation_is_rejected);
     RUN_TEST(test_every_truncation_of_a_bare_model_is_rejected);
     RUN_TEST(test_every_truncation_of_its_texture_is_rejected);
     RUN_TEST(test_a_bad_magic_is_rejected);
     RUN_TEST(test_a_version_other_than_one_is_rejected);
     RUN_TEST(test_zero_vertices_or_faces_are_rejected);
-    RUN_TEST(test_vertices_past_the_pool_limit_are_rejected);
-    RUN_TEST(test_faces_past_the_pool_limit_are_rejected);
-    RUN_TEST(test_normals_past_the_pool_limit_are_rejected);
-    RUN_TEST(test_uvs_past_the_pool_limit_are_rejected);
     RUN_TEST(test_a_vertex_index_out_of_range_is_rejected);
     RUN_TEST(test_a_normal_index_out_of_range_is_rejected);
     RUN_TEST(test_a_normal_index_without_normals_is_rejected);

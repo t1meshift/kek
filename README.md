@@ -7,7 +7,7 @@ KEK is a 2D/3D software renderer/engine written in pure C99 with no dynamic allo
 
 ## Structure
 The library is the product; everything else consumes it.
-- `kek/` — the library: rasterization (2D and 3D), math, pool allocator, model/image/palette/font handling. No platform code and no dependencies
+- `kek/` — the library: rasterization (2D and 3D), math, an arena for assets, model/image/palette/font handling. No platform code and no dependencies
 - `demo/` — a demo scene, its assets and the SDL3 platform layer that runs it on Windows, Linux and, through Emscripten, the browser. None of it is part of the library: a game starts from a copy of `demo/platform/`. The game itself lives in a separate repository
 - `tools/kek_editor/` — an editor built on Dear ImGui (C++20) that links against the library. The shell and the tool-plugin architecture work; the scene and model tools are still stubs.
 
@@ -61,16 +61,16 @@ target_link_libraries(my_game PRIVATE kek::kek)
 
 with `-DCMAKE_PREFIX_PATH=<prefix>` when configuring the consumer. `add_subdirectory` gives the same `kek::kek`.
 
-The application owns the engine's memory. It hands `kek_init` one block, and the engine lays out its frame, depth buffer and palettes inside it:
+The application owns all of the engine's memory; the library keeps none of its own. It hands `kek_init` one block. The engine lays out its frame, depth buffer, palettes and handle tables inside it, and whatever the application adds on top of `KEK_MEMORY_SIZE` is the arena that models and textures come from:
 
 ```c
-static unsigned char memory[KEK_MEMORY_SIZE(320, 200)];
+static unsigned char memory[KEK_MEMORY_SIZE(320, 200) + 256 * 1024];
 KEK_engine engine;
 
 kek_init(&engine, &(KEK_desc){ .width = 320, .height = 200 }, memory, sizeof memory);
 ```
 
-The pool limits (`KEK_MODEL_POOL_CAPACITY` and the rest) are still compile-time and baked into the installed package, until the pools move into the block as well. `demo/` is a complete consumer and builds that way on its own:
+There are no per-model or per-texture limits: a model or a texture is as big as the arena has room for. `kek_arena_mark` and `kek_arena_release` free everything loaded since a mark at once, which is how a level's assets go away. `demo/` is a complete consumer and builds that way on its own:
 
 ```sh
 cmake -S demo -B build-demo -DCMAKE_PREFIX_PATH=<prefix>

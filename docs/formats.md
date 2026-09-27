@@ -73,12 +73,10 @@ primitive.
 
 ### What the loader refuses
 
-Beyond the magic and the version: a zero vertex or face count; counts past the
-pool limits (`KEK_POOL_MODEL_VERTS_MAX` for vertices *and* normals,
-`KEK_POOL_MODEL_FACES_MAX`, `KEK_POOL_MODEL_UVS_MAX` for `uv_count` and, when
-`HAS_TEXTURE` is set, for `faces_count` too — `face_textures` holds one UV
-triple per face, not per UV — and `KEK_POOL_MODEL_COLORS_MAX` for the colour
-block); a texture name whose last
+Beyond the magic and the version: a zero vertex or face count; a file that,
+staged and then built into a model, needs more than the engine's arena has
+free — there are no per-model limits beyond that and the `uint16_t` counts; a
+texture name whose last
 byte is not `\0` — its length needs no check, since a one-byte field cannot
 describe a name the 256-byte buffer will not hold; a file that ends early at
 any point; a face vertex index at or past `vertices_count`; a normal index that is
@@ -98,6 +96,8 @@ vertex has to say `0xFFFF`, because no index is below zero.
   normals, a corner whose index is `0xFFFF` falls back to that same computed
   normal. This is the single largest array in the engine and Tier 2 of the
   backlog is about undoing it.
+- **UVs are expanded to three per face** in the same way, so `face_textures`
+  is sized by `faces_count`, not by `uv_count`.
 - **Missing UVs become NaN.** Under `HAS_TEXTURE`, a corner with no UV index
   gets `{NAN, NAN}` rather than `{0, 0}`, so it is visibly wrong rather than
   quietly sampling the corner of the texture.
@@ -120,9 +120,8 @@ vertex has to say `0xFFFF`, because no index is below zero.
 | 10 | 1 | `encoding` | 0 = raw, 1 = RLE |
 | 11 | 5 | `reserved` | written as 0 |
 
-The loader bounds the image by `width * height` against
-`KEK_POOL_TEXTURE_PIXELS_MAX` rather than by either dimension alone. The writer
-additionally caps each dimension at 1024.
+The loader bounds the image only by whether `width * height` bytes fit in the
+engine's arena. The writer caps each dimension at 1024.
 
 ### Body
 
@@ -138,7 +137,7 @@ Runs are not bounded by row: a run may cross from the end of one row into the
 next.
 
 Nothing writes encoding 1 today. `bmp_to_kif.py` always emits raw; the decoder
-is there because the format is meant for a machine where the texture pool is
+is there because the format is meant for a machine where texture memory is
 the expensive thing.
 
 ---

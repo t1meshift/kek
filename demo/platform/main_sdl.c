@@ -38,7 +38,11 @@ typedef struct App {
 } App;
 
 static App APP;
-static unsigned char APP_ENGINE_MEMORY[KEK_MEMORY_SIZE(APP_FRAME_WIDTH, APP_FRAME_HEIGHT)];
+/* The engine's frame and tables, and on top of them the arena every model and
+   texture comes from. The cat is ~48 KB and its texture 64 KB; the rest is
+   headroom for the staging a load takes while it runs. */
+#define APP_ASSET_BUDGET ((size_t)256u * 1024u)
+static unsigned char APP_ENGINE_MEMORY[KEK_MEMORY_SIZE(APP_FRAME_WIDTH, APP_FRAME_HEIGHT) + APP_ASSET_BUDGET];
 
 static void app_build_palette(App* app) {
     for (int i = 0; i < 256; ++i) {

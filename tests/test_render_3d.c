@@ -210,6 +210,26 @@ void test_a_cube_in_front_of_the_camera_draws(void) {
     kek_test_frame_assert_guards();
 }
 
+/* The view-space vertices are a temporary from the arena. A model with more
+   than the arena can hold is not drawn — and not read either, so its arrays
+   can be as short as this one's. The arena is whole again afterwards, and a
+   model that fits still draws. */
+void test_a_model_too_big_to_transform_draws_nothing(void) {
+    KEK_camera camera = KEK_DEFAULT_CAMERA;
+    KEK_model huge = *kek_model_get(&e, kek_default_cube_model_handle(&e));
+    size_t free_bytes = kek_arena_available(&e);
+
+    huge.verts_count = 0x10000000u;
+    kek_3d_draw_model(&e, &huge, &camera, (KEK_FVec3){ 0.f, 0.f, 3.f }, (KEK_FVec3){ 0.f, 0.f, 0.f });
+    TEST_ASSERT_EQUAL_INT(0, kek_test_frame_painted(&e));
+    TEST_ASSERT_EQUAL_size_t(free_bytes, kek_arena_available(&e));
+
+    draw_cube(0.f, 0.f, 3.f, 0.6f);
+    TEST_ASSERT_GREATER_THAN_INT(0, kek_test_frame_painted(&e));
+    TEST_ASSERT_EQUAL_size_t(free_bytes, kek_arena_available(&e));
+    kek_test_frame_assert_guards();
+}
+
 void test_a_cube_behind_the_camera_or_past_the_far_plane_draws_nothing(void) {
     draw_cube(0.f, 0.f, -3.f, 0.6f);
     draw_cube(0.f, 0.f, 2000.f, 0.6f);
@@ -492,5 +512,6 @@ int main(void) {
     RUN_TEST(test_a_shaded_texture_is_the_unshaded_one_through_the_shading_palette);
     RUN_TEST(test_fog_darkens_what_is_past_its_end_and_spares_what_is_before_its_start);
     RUN_TEST(test_fog_with_its_end_not_past_its_start_is_off);
+    RUN_TEST(test_a_model_too_big_to_transform_draws_nothing);
     return UNITY_END();
 }

@@ -6,9 +6,18 @@
 #include "kek_palette.h"
 #include "kek_config.h"
 #include "kek_math.h"
+#include "kek_internal.h"
+
+static uint16_t kek_desc_models_(const KEK_desc* desc) {
+    return desc->models ? desc->models : (uint16_t)KEK_DEFAULT_MODELS;
+}
+
+static uint16_t kek_desc_textures_(const KEK_desc* desc) {
+    return desc->textures ? desc->textures : (uint16_t)KEK_DEFAULT_TEXTURES;
+}
 
 size_t kek_memory_size(const KEK_desc* desc) {
-    return KEK_MEMORY_SIZE(desc->width, desc->height);
+    return KEK_MEMORY_SIZE_FOR_(desc->width, desc->height, kek_desc_models_(desc), kek_desc_textures_(desc));
 }
 
 /* Hands out the block front to back, each piece on a KEK_MEMORY_ALIGN
@@ -42,6 +51,12 @@ int kek_init(KEK_engine* e, const KEK_desc* desc, void* memory, size_t size) {
     result.w = desc->width;
     result.h = desc->height;
     result.target_fps = KEK_TARGET_FPS;
+    /* Everything after the palettes, to the last alignment boundary in the
+       block. The tables and the defaults come first, from kek_pool_init. */
+    result.arena.base = (unsigned char*)cursor;
+    result.arena.low = 0;
+    result.arena.high = ((uintptr_t)memory + size - cursor) & ~(uintptr_t)(KEK_MEMORY_ALIGN - 1u);
+    result.arena.floor = 0;
     result.model_pool.slots = 0;
     result.model_pool.capacity = 0;
     result.texture_pool.slots = 0;
@@ -63,7 +78,10 @@ int kek_init(KEK_engine* e, const KEK_desc* desc, void* memory, size_t size) {
     /* The block is whatever the application had lying there, not the zeroes a
        static buffer used to start with. */
     kek_flush_buffers(&result);
-    kek_pool_init(&result);
+    /* kek_memory_size left room for exactly this, so it does not fail. */
+    if (!kek_pool_init(&result, kek_desc_models_(desc), kek_desc_textures_(desc))) {
+        return 0;
+    }
 
     *e = result;
     return 1;

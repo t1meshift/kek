@@ -410,8 +410,11 @@ static float kek_3d_vertex_shade(const KEK_light* light, float face_shade, float
 }
 
 void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FVec3 pos, KEK_FVec3 rotation) {
-    /* Fix 1: static buffers — avoids ~25 KB of stack allocation per draw call */
-    static KEK_FVec3 view_verts[KEK_POOL_MODEL_VERTS_MAX];
+    /* The view-space vertices are a temporary off the top of the arena, as
+       many as this model has, gone again at the end of the call. */
+    size_t mark = kek_arena_temp_mark(&e->arena);
+    size_t view_verts_size;
+    KEK_FVec3* view_verts;
     char use_colors = mdl->face_colors != 0 && mdl->colors_count > 0;
     /* Resolved once per model, not once per face: a stale handle just means
        the model draws untextured. */
@@ -422,7 +425,14 @@ void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FV
     float aspect_ratio, focal_length, half_w, half_h;
     uint32_t i;
 
-    if (mdl->verts_count > KEK_POOL_MODEL_VERTS_MAX) {
+    /* A model the arena has no room to transform is not drawn. The product
+       can only wrap where size_t is 32 bits, and the division catches that. */
+    view_verts_size = (size_t)mdl->verts_count * sizeof(KEK_FVec3);
+    if (view_verts_size / sizeof(KEK_FVec3) != mdl->verts_count) {
+        return;
+    }
+    view_verts = (KEK_FVec3*)kek_arena_temp(&e->arena, view_verts_size);
+    if (!view_verts) {
         return;
     }
 
@@ -537,4 +547,6 @@ void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FV
             }
         }
     }
+
+    kek_arena_temp_release(&e->arena, mark);
 }

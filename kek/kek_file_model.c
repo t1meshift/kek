@@ -4,6 +4,7 @@
 #include "kek_file_image.h"
 #include "kek_math.h"
 #include "kek_pool.h"
+#include "kek_internal.h"
 
 /* A zero-size read is a failure, not a trivially satisfied success: kek_asset_read
    returns 0 for a stream with no vtable, and 0 == 0 would report that out_data
@@ -58,39 +59,27 @@ static void kek_file_model_generate_normals(
     out_model->face_normals_count = faces_count;
 }
 
-/* A whole worst-case KMF is staged here before any of it reaches a pool slot,
-   because the file has to be validated — face indices against the vertex count,
-   UV indices against the UV count — before a slot is taken. At the pool's
-   1024-of-everything limits that is ~51 KB, and as locals it was ~51 KB of
-   stack: the single reason the browser build asked for -sSTACK_SIZE=1048576
-   against Emscripten's 64 KB default.
-
-   Static instead, which is what the rest of the engine does with its buffers
-   and costs nothing at runtime. Not reentrant, and does not need to be — the
-   one nested call is into kek_file_image_load for the texture, which has its
-   own storage and never comes back here. */
-static struct {
-    KEK_FileModel_Vertex vertices[KEK_POOL_MODEL_VERTS_MAX];
-    KEK_FileModel_Normal normals[KEK_POOL_MODEL_VERTS_MAX];
-    KEK_FileModel_UV uvs[KEK_POOL_MODEL_UVS_MAX];
-    KEK_FileModel_Face faces[KEK_POOL_MODEL_FACES_MAX];
-    char texture_name[256];
-} KEK_FILE_MODEL_SCRATCH;
-
-KEK_ModelHandle kek_file_model_load(KEK_engine *e, const char *path) {
+/* The file is staged whole before any of it reaches the model, because it has
+   to be validated — face indices against the vertex count, UV indices against
+   the UV count — first. The staging is temporaries off the top of the arena,
+   sized by the header: kek_file_model_load takes a mark before this runs and
+   releases to it after, on every path out. The texture load nested in here
+   takes its pixels from the low end and never touches them. */
+static KEK_ModelHandle kek_file_model_load_(KEK_engine *e, const char *path) {
     KEK_AssetInfo info;
     KEK_AssetStream stream;
     KEK_FileModel_Header hdr;
     KEK_ModelHandle model_handle;
     KEK_model* out_model;
-    KEK_FileModel_Vertex* vertices = KEK_FILE_MODEL_SCRATCH.vertices;
-    KEK_FileModel_Normal* normals = KEK_FILE_MODEL_SCRATCH.normals;
-    KEK_FileModel_UV* uvs = KEK_FILE_MODEL_SCRATCH.uvs;
-    KEK_FileModel_Face* faces = KEK_FILE_MODEL_SCRATCH.faces;
-    char* texture_name = KEK_FILE_MODEL_SCRATCH.texture_name;
+    KEK_FileModel_Vertex* vertices;
+    KEK_FileModel_Normal* normals;
+    KEK_FileModel_UV* uvs;
+    KEK_FileModel_Face* faces;
+    char texture_name[256];
     size_t texture_name_size;
+    unsigned model_flags = 0;
 
-    if (!e || !e->assets || !path) {
+    if (!e->assets || !path) {
         return KEK_MODEL_HANDLE_INVALID;
     }
 
@@ -107,25 +96,27 @@ KEK_ModelHandle kek_file_model_load(KEK_engine *e, const char *path) {
         return KEK_MODEL_HANDLE_INVALID;
     }
 
-    /* hdr.uv_count here is bounded against the scratch uvs[] buffer below,
-       which KEK_POOL_MODEL_UVS_MAX sizes. A textured model's faces_count is
-       checked against the same limit further down, once HAS_TEXTURE is known
-       — that one guards face_textures in the pool slot, one UV triple per
-       face rather than per UV, and is not this check's job. */
+    /* No upper limits: every count is a uint16_t, and what the arena cannot
+       hold is refused where the staging or the model is taken. */
     if (hdr.magic[0] != 'K' || hdr.magic[1] != 'M' || hdr.magic[2] != 'D' || hdr.magic[3] != 'L' ||
         hdr.version != 1 ||
-        hdr.vertices_count == 0 || hdr.faces_count == 0 ||
-        hdr.vertices_count > KEK_POOL_MODEL_VERTS_MAX ||
-        hdr.faces_count > KEK_POOL_MODEL_FACES_MAX ||
-        hdr.uv_count > KEK_POOL_MODEL_UVS_MAX) {
+        hdr.vertices_count == 0 || hdr.faces_count == 0) {
+        kek_asset_close(&stream);
+        return KEK_MODEL_HANDLE_INVALID;
+    }
+
+    vertices = (KEK_FileModel_Vertex*)kek_arena_temp(&e->arena, sizeof(vertices[0]) * hdr.vertices_count);
+    normals = (KEK_FileModel_Normal*)kek_arena_temp(&e->arena, sizeof(normals[0]) * hdr.normals_count);
+    uvs = (KEK_FileModel_UV*)kek_arena_temp(&e->arena, sizeof(uvs[0]) * hdr.uv_count);
+    faces = (KEK_FileModel_Face*)kek_arena_temp(&e->arena, sizeof(faces[0]) * hdr.faces_count);
+    if (!vertices || !normals || !uvs || !faces) {
         kek_asset_close(&stream);
         return KEK_MODEL_HANDLE_INVALID;
     }
 
     texture_name_size = hdr.texture_name_size;
     if (texture_name_size > 0) {
-        /* Not sizeof(texture_name): that is a pointer into the scratch now. */
-        if (texture_name_size > sizeof(KEK_FILE_MODEL_SCRATCH.texture_name)) {
+        if (texture_name_size > sizeof(texture_name)) {
             kek_asset_close(&stream);
             return KEK_MODEL_HANDLE_INVALID;
         }
@@ -144,12 +135,10 @@ KEK_ModelHandle kek_file_model_load(KEK_engine *e, const char *path) {
         return KEK_MODEL_HANDLE_INVALID;
     }
 
-    if (hdr.normals_count > 0) {
-        if (hdr.normals_count > KEK_POOL_MODEL_VERTS_MAX ||
-            !kek_file_model_read_exact(&stream, normals, sizeof(normals[0]) * hdr.normals_count)) {
-            kek_asset_close(&stream);
-            return KEK_MODEL_HANDLE_INVALID;
-        }
+    if (hdr.normals_count > 0 &&
+        !kek_file_model_read_exact(&stream, normals, sizeof(normals[0]) * hdr.normals_count)) {
+        kek_asset_close(&stream);
+        return KEK_MODEL_HANDLE_INVALID;
     }
 
     if (hdr.uv_count > 0 &&
@@ -163,7 +152,15 @@ KEK_ModelHandle kek_file_model_load(KEK_engine *e, const char *path) {
         return KEK_MODEL_HANDLE_INVALID;
     }
 
-    model_handle = kek_model_create(e);
+    /* face_textures is one UV triple per face, so it is sized by faces_count
+       like every other per-face array, whatever uv_count says. */
+    if ((hdr.flags & KEK_FILEMODEL_HAS_FACE_COLORS) != 0) {
+        model_flags |= KEK_MODEL_FACE_COLORS;
+    }
+    if ((hdr.flags & KEK_FILEMODEL_HAS_TEXTURE) != 0) {
+        model_flags |= KEK_MODEL_FACE_UVS;
+    }
+    model_handle = kek_model_create(e, hdr.vertices_count, hdr.faces_count, model_flags);
     out_model = kek_model_get(e, model_handle);
     if (model_handle == KEK_MODEL_HANDLE_INVALID || !out_model) {
         kek_asset_close(&stream);
@@ -235,8 +232,7 @@ KEK_ModelHandle kek_file_model_load(KEK_engine *e, const char *path) {
     }
 
     if ((hdr.flags & KEK_FILEMODEL_HAS_FACE_COLORS) != 0) {
-        if (hdr.faces_count > KEK_POOL_MODEL_COLORS_MAX ||
-            !kek_file_model_read_exact(&stream, out_model->face_colors, hdr.faces_count)) {
+        if (!kek_file_model_read_exact(&stream, out_model->face_colors, hdr.faces_count)) {
             kek_asset_close(&stream);
             kek_model_destroy(e, model_handle);
             return KEK_MODEL_HANDLE_INVALID;
@@ -247,11 +243,7 @@ KEK_ModelHandle kek_file_model_load(KEK_engine *e, const char *path) {
     if ((hdr.flags & KEK_FILEMODEL_HAS_TEXTURE) != 0) {
         KEK_TextureHandle texture_handle;
 
-        /* face_textures is one UV triple per face, sized by
-           KEK_POOL_MODEL_UVS_MAX same as the scratch uvs[] above; the loop
-           below writes faces_count entries into it, so faces_count needs the
-           same check the colour block already gets against its own limit. */
-        if (texture_name_size == 0 || hdr.faces_count > KEK_POOL_MODEL_UVS_MAX) {
+        if (texture_name_size == 0) {
             kek_asset_close(&stream);
             kek_model_destroy(e, model_handle);
             return KEK_MODEL_HANDLE_INVALID;
@@ -286,4 +278,17 @@ KEK_ModelHandle kek_file_model_load(KEK_engine *e, const char *path) {
 
     kek_asset_close(&stream);
     return model_handle;
+}
+
+KEK_ModelHandle kek_file_model_load(KEK_engine *e, const char *path) {
+    size_t mark;
+    KEK_ModelHandle handle;
+
+    if (!e) {
+        return KEK_MODEL_HANDLE_INVALID;
+    }
+    mark = kek_arena_temp_mark(&e->arena);
+    handle = kek_file_model_load_(e, path);
+    kek_arena_temp_release(&e->arena, mark);
+    return handle;
 }

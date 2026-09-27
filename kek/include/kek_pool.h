@@ -5,39 +5,29 @@
 extern "C" {
 #endif
 
+#include <stddef.h>
 #include <stdint.h>
-#include "kek_config.h"
 #include "kek_model.h"
 #include "kek_texture.h"
 
 /* The handle types and their invalid values live next to what they refer to,
    in kek_model.h and kek_texture.h — both are included above. */
 
+/* A handle names a slot; the slot names the model's storage in the arena,
+   sized for that model when it was created. The tables of slots are in the
+   arena too, sized by KEK_desc. */
 typedef struct KEK_ModelPoolSlot {
     KEK_model model;
-    uint8_t used;
+    size_t block; /* the arena block holding the model's arrays */
     uint16_t generation;
-    uint32_t verts_capacity;
-    uint32_t faces_capacity;
-    uint32_t face_normals_capacity;
-    uint32_t colors_capacity;
-    uint32_t textures_capacity;
-    KEK_FVec3 verts[KEK_POOL_MODEL_VERTS_MAX];
-    KEK_model_face faces[KEK_POOL_MODEL_FACES_MAX];
-    KEK_model_face_normal face_normals[KEK_POOL_MODEL_FACES_MAX];
-    uint8_t face_colors[KEK_POOL_MODEL_COLORS_MAX];
-    /* One UV triple per face, not per UV — kek_file_model_load checks a
-       textured model's faces_count against KEK_POOL_MODEL_UVS_MAX before it
-       writes here, the same limit that bounds a KMF's uv_count. */
-    KEK_model_face_uv face_textures[KEK_POOL_MODEL_UVS_MAX];
+    uint8_t used;
 } KEK_ModelPoolSlot;
 
 typedef struct KEK_TexturePoolSlot {
     KEK_texture texture;
-    uint8_t used;
+    size_t block; /* the arena block holding the pixels */
     uint16_t generation;
-    uint32_t pixel_capacity;
-    uint8_t data[KEK_POOL_TEXTURE_PIXELS_MAX];
+    uint8_t used;
 } KEK_TexturePoolSlot;
 
 typedef struct KEK_ModelPool {

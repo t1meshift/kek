@@ -2,8 +2,8 @@
 #define KEK_TEST_SUPPORT_H
 
 /* Shared by the suites. Everything here goes through the engine's public API:
-   the pool is measured by what it will hand out, not by reading its slots, so
-   these helpers keep working when Tier 2 puts an arena underneath. */
+   the pool is measured by what it will hand out and the arena by
+   kek_arena_available, never by reading a slot or a footer. */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -14,21 +14,31 @@
 #define KEK_TEST_WIDTH 320u
 #define KEK_TEST_HEIGHT 200u
 
+/* The arena kek_test_init gives an engine: room for every suite's largest
+   asset with plenty to spare. */
+#define KEK_TEST_ARENA ((size_t)512u * 1024u)
+
 /* kek_init over a block of the suites' own, sized for KEK_TEST_WIDTH x
-   KEK_TEST_HEIGHT. Fails the test if kek_init does. */
+   KEK_TEST_HEIGHT plus KEK_TEST_ARENA, with the default handle tables. Fails
+   the test if kek_init does. */
 void kek_test_init(KEK_engine* e);
+/* The same with an arena of arena bytes, at most KEK_TEST_ARENA: for a test
+   that needs the arena to run out. */
+void kek_test_init_arena(KEK_engine* e, size_t arena);
 
 /* How many more models (textures) the pool will hand out right now. Takes
    them all, counts, and gives them back, so the pool is left as it was apart
-   from the generations of the slots it touched. */
+   from the generations of the slots it touched. Empty models and 1x1
+   textures, so what runs out is the handle table rather than the arena. */
 int kek_test_free_models(KEK_engine* e);
 int kek_test_free_textures(KEK_engine* e);
 
 /* A file under construction, written byte by byte in the order and byte order
    docs/formats.md gives — never by dumping a struct, which would only prove
-   the loader agrees with itself. Sized for the largest test input, a KIF at
-   the texture pool's pixel limit. */
-#define KEK_TEST_FILE_CAPACITY (16 + KEK_POOL_TEXTURE_PIXELS_MAX + 1024)
+   the loader agrees with itself. Sized for the largest test input, a 256x256
+   KIF. */
+#define KEK_TEST_IMAGE_PIXELS_MAX ((size_t)256u * 256u)
+#define KEK_TEST_FILE_CAPACITY (16 + KEK_TEST_IMAGE_PIXELS_MAX + 1024)
 
 typedef struct KEK_TestFile {
     uint8_t bytes[KEK_TEST_FILE_CAPACITY];

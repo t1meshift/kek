@@ -68,10 +68,10 @@ void test_the_defaults_cannot_be_destroyed(void) {
 }
 
 void test_live_handles_are_valid_and_distinct(void) {
-    KEK_ModelHandle a = kek_model_create(&e);
-    KEK_ModelHandle b = kek_model_create(&e);
-    KEK_TextureHandle ta = kek_texture_create(&e);
-    KEK_TextureHandle tb = kek_texture_create(&e);
+    KEK_ModelHandle a = kek_model_create(&e, 0, 0, 0);
+    KEK_ModelHandle b = kek_model_create(&e, 0, 0, 0);
+    KEK_TextureHandle ta = kek_texture_create(&e, 1, 1);
+    KEK_TextureHandle tb = kek_texture_create(&e, 1, 1);
 
     TEST_ASSERT_NOT_EQUAL(KEK_MODEL_HANDLE_INVALID, a);
     TEST_ASSERT_NOT_EQUAL(KEK_MODEL_HANDLE_INVALID, b);
@@ -88,7 +88,7 @@ void test_live_handles_are_valid_and_distinct(void) {
 }
 
 void test_a_new_model_is_empty(void) {
-    KEK_model* mdl = kek_model_get(&e, kek_model_create(&e));
+    KEK_model* mdl = kek_model_get(&e, kek_model_create(&e, 0, 0, 0));
 
     TEST_ASSERT_NOT_NULL(mdl);
     TEST_ASSERT_EQUAL_UINT32(0, mdl->verts_count);
@@ -112,9 +112,9 @@ void test_handles_that_were_never_issued_are_rejected(void) {
 }
 
 void test_a_null_engine_is_refused(void) {
-    TEST_ASSERT_EQUAL_UINT32(KEK_MODEL_HANDLE_INVALID, kek_model_create(0));
+    TEST_ASSERT_EQUAL_UINT32(KEK_MODEL_HANDLE_INVALID, kek_model_create(0, 0, 0, 0));
     TEST_ASSERT_EQUAL_UINT32(KEK_MODEL_HANDLE_INVALID, kek_model_clone(0, &KEK_CUBE_MODEL));
-    TEST_ASSERT_EQUAL_UINT32(KEK_TEXTURE_HANDLE_INVALID, kek_texture_create(0));
+    TEST_ASSERT_EQUAL_UINT32(KEK_TEXTURE_HANDLE_INVALID, kek_texture_create(0, 1, 1));
     TEST_ASSERT_EQUAL_UINT32(KEK_TEXTURE_HANDLE_INVALID, kek_texture_clone(0, &SMALL_TEXTURE));
     TEST_ASSERT_NULL(kek_model_get(0, kek_default_cube_model_handle(&e)));
     TEST_ASSERT_NULL(kek_texture_get(0, kek_default_texture_handle(&e)));
@@ -126,7 +126,7 @@ void test_a_null_engine_is_refused(void) {
 
 void test_a_destroyed_handle_is_stale_even_after_its_storage_is_reused(void) {
     int free_before = kek_test_free_models(&e);
-    KEK_ModelHandle first = kek_model_create(&e);
+    KEK_ModelHandle first = kek_model_create(&e, 0, 0, 0);
     KEK_ModelHandle second;
 
     kek_model_destroy(&e, first);
@@ -135,7 +135,7 @@ void test_a_destroyed_handle_is_stale_even_after_its_storage_is_reused(void) {
 
     /* Whatever the allocator hands out next — very likely the same storage —
        must not answer to the old handle. */
-    second = kek_model_create(&e);
+    second = kek_model_create(&e, 0, 0, 0);
     TEST_ASSERT_NOT_EQUAL(KEK_MODEL_HANDLE_INVALID, second);
     TEST_ASSERT_NOT_EQUAL(first, second);
     TEST_ASSERT_NULL(kek_model_get(&e, first));
@@ -147,13 +147,13 @@ void test_a_destroyed_handle_is_stale_even_after_its_storage_is_reused(void) {
 }
 
 void test_a_destroyed_texture_handle_is_stale_even_after_its_storage_is_reused(void) {
-    KEK_TextureHandle first = kek_texture_create(&e);
+    KEK_TextureHandle first = kek_texture_create(&e, 1, 1);
     KEK_TextureHandle second;
 
     kek_texture_destroy(&e, first);
     TEST_ASSERT_NULL(kek_texture_get(&e, first));
 
-    second = kek_texture_create(&e);
+    second = kek_texture_create(&e, 1, 1);
     TEST_ASSERT_NOT_EQUAL(first, second);
     TEST_ASSERT_NULL(kek_texture_get(&e, first));
 
@@ -167,7 +167,7 @@ void test_no_stale_handle_comes_back_over_many_reuses(void) {
     int i, j;
 
     for (i = 0; i < CYCLES; ++i) {
-        seen[i] = kek_model_create(&e);
+        seen[i] = kek_model_create(&e, 0, 0, 0);
         TEST_ASSERT_NOT_EQUAL(KEK_MODEL_HANDLE_INVALID, seen[i]);
         kek_model_destroy(&e, seen[i]);
     }
@@ -193,17 +193,17 @@ void test_the_pool_refuses_past_capacity_and_recovers(void) {
     TEST_ASSERT_GREATER_THAN_INT(0, free_textures);
 
     for (i = 0; i < free_models; ++i) {
-        last = kek_model_create(&e);
+        last = kek_model_create(&e, 0, 0, 0);
         TEST_ASSERT_NOT_EQUAL(KEK_MODEL_HANDLE_INVALID, last);
     }
-    TEST_ASSERT_EQUAL_UINT32(KEK_MODEL_HANDLE_INVALID, kek_model_create(&e));
+    TEST_ASSERT_EQUAL_UINT32(KEK_MODEL_HANDLE_INVALID, kek_model_create(&e, 0, 0, 0));
     TEST_ASSERT_EQUAL_UINT32(KEK_MODEL_HANDLE_INVALID, kek_model_clone(&e, &KEK_CUBE_MODEL));
 
     for (i = 0; i < free_textures; ++i) {
-        last_texture = kek_texture_create(&e);
+        last_texture = kek_texture_create(&e, 1, 1);
         TEST_ASSERT_NOT_EQUAL(KEK_TEXTURE_HANDLE_INVALID, last_texture);
     }
-    TEST_ASSERT_EQUAL_UINT32(KEK_TEXTURE_HANDLE_INVALID, kek_texture_create(&e));
+    TEST_ASSERT_EQUAL_UINT32(KEK_TEXTURE_HANDLE_INVALID, kek_texture_create(&e, 1, 1));
     TEST_ASSERT_EQUAL_UINT32(KEK_TEXTURE_HANDLE_INVALID, kek_texture_clone(&e, &SMALL_TEXTURE));
 
     /* A refusal must not have disturbed anything that was live. */
@@ -221,9 +221,9 @@ void test_init_empties_a_full_pool(void) {
     int free_models = kek_test_free_models(&e);
     int free_textures = kek_test_free_textures(&e);
 
-    while (kek_model_create(&e) != KEK_MODEL_HANDLE_INVALID) {
+    while (kek_model_create(&e, 0, 0, 0) != KEK_MODEL_HANDLE_INVALID) {
     }
-    while (kek_texture_create(&e) != KEK_TEXTURE_HANDLE_INVALID) {
+    while (kek_texture_create(&e, 1, 1) != KEK_TEXTURE_HANDLE_INVALID) {
     }
 
     kek_test_init(&e);

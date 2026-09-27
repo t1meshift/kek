@@ -27,7 +27,7 @@ These shape several items below, so they are recorded once here.
 
 ## Tier 0 — Foundation
 
-Nothing open. Tier 1 is next.
+Nothing open. Tier 2 is next.
 
 ## Tier 1 — The engine as a library
 
@@ -37,24 +37,21 @@ keeps no storage of its own: everything is in the block the application hands `k
 ## Tier 2 — Target machine: Pentium, running on a 486
 
 Budget: fit comfortably into ~4 MB including assets. The worst-case pools are gone (`16ffe9d`): a
-320×200 engine is a block of `KEK_MEMORY_SIZE(320, 200)` = 331,535 bytes on a 64-bit build and 328,463
+320×200 engine is a block of `KEK_MEMORY_SIZE(320, 200)` = 329,487 bytes on a 64-bit build and 326,927
 on a 32-bit one, plus whatever the application gives its arena. Nearly all of it is the frame:
 
 | | Bytes |
 | --- | --- |
 | Depth buffer, `float` | 256,000 |
 | Framebuffer | 64,000 |
-| Handle tables, 64 + 64 slots | 7,680 (64-bit), 4,608 (32-bit) |
-| Default cube and texture, in a 2,048 reserve | 1,264 |
+| Handle tables, 64 + 64 slots | 6,656 (64-bit), 4,096 (32-bit) |
 | Palette + shading palette | 1,792 |
+| Default cube and texture, in a 1,024 reserve | 832 |
 
-- **Normals are the largest array in the engine and nothing reads them.** `KEK_model_face_normal` is
-  3 × `KEK_FVec3` = 36 bytes per face — 432 of the default cube's 1,264 bytes — and `kek_3d_draw_model`
-  never touches them. Lighting does not read them either: it derives the face normal from the vertices at
-  draw time (`424f69e`). So the array can go outright rather than shrink, and the loader can stop
-  expanding the indexed normals KMF stores (`KEK_FileModel_FaceVertex.normal`). If Gouraud ever comes
-  (Tier 7), per-corner normals come back as a byte each, not 12. UVs have the same shape: indexed on
-  disk, 24 bytes per face in memory.
+- **UVs are the largest per-face array.** Indexed on disk, expanded in memory to a `KEK_FVec2` per
+  corner: 24 bytes per face, twice the face's own indices. Indexed in memory they would be the distinct
+  UVs at 8 bytes each plus three `uint16` per face. Whether that pays depends on how often real models
+  share UVs between faces; measure on the demo's assets first.
 - **Quantise vertices.** Quake's MDL format stored positions as `uint8` with a per-model scale and offset —
   four times smaller than float, and a natural step toward fixed point.
 - **Fixed point.** Go through a `kek_scalar` typedef and a small operation set, keeping the float build as
@@ -173,9 +170,9 @@ and camera coordinates ([demo_scene_entry.c](demo/demo_scene_entry.c)).
   today — the first two were checked byte for byte when the item shrank to three channels — but nothing
   keeps them agreeing. Generate the Python copies from the C table, or the C table from a data file.
 - **Gouraud as a model option.** `424f69e` shades flat, one shade per face. That suits the look, costs one table
-  lookup per pixel and lets the normals go (Tier 2). Smooth models would want a shade per corner, and the
+  lookup per pixel and let the normals go (`01673ea`). Smooth models would want a shade per corner, and the
   interpolation is already there for fog. The normals can come back small: Quake stored a vertex normal
-  as a byte indexing a table of 162 directions.
+  as a byte indexing a table of 162 directions. KMF still carries them, so the loader has them to read.
 - **How much of libc the library needs** — `needs a decision`. Today: the freestanding headers
   (`stdint.h`, `stddef.h`, `limits.h`), `memcpy`/`memset` and one `strcmp` in the in-memory asset
   provider, plus libm, which Tier 3's transcendentals item removes. GCC and Clang emit calls to
@@ -234,6 +231,7 @@ on the hash has the reasoning, the measurements and what was verified.
 | | Was | Commit |
 | --- | --- | --- |
 | Worst-case slots | A model slot was 87,136 bytes whatever it held and a texture slot 65,560, ×90 and ×256 the defaults. A two-ended arena in the rest of the block: assets sized exactly from the low end, temporaries from the high end, a footer per block so that a destroy in any order gives the memory back once what is above it has gone, and `kek_arena_mark`/`kek_arena_release` for a level's lifetime. `kek_model_create` and `kek_texture_create` take sizes. Generations are unchanged | `16ffe9d` |
+| Normals nobody read | `KEK_model_face_normal` was 36 bytes per face, 432 of the default cube's 1,264, and neither drawing nor lighting read it. Gone from the model; the KMF loader checks normal indices and reads past the normals without staging them. The builtin reserve went from 2,048 to 1,024 with it | `01673ea` |
 
 ### Tier 3
 

@@ -359,15 +359,12 @@ void kek_3d_set_fog(KEK_engine* engine, float start, float end) {
     engine->light.fog_end = end;
 }
 
-/* The face's own shade in levels, from a normal derived from the face rather
-   than read from the model: every model has vertices, not every model has
-   normals (a hand-built one may leave face_normals null), and the ones it
-   has are per corner, which flat shading has no use for.
+/* The face's own shade in levels, from a normal derived from the face: a model
+   stores no normals, since this is all flat shading needs of one.
 
    Both vectors are in view space. The camera turns the light and the face
    alike, so this is the same dot product as in the world. cross(b - a, c - a)
-   points out of the face — the winding kek_file_model_calculate_face_normal
-   assumes, and the one the backface cull keeps. */
+   points out of the face — the winding the backface cull keeps. */
 static float kek_3d_face_shade(const KEK_FVec3 v[3], KEK_FVec3 light_view, float ambient) {
     float abx = v[1].x - v[0].x, aby = v[1].y - v[0].y, abz = v[1].z - v[0].z;
     float acx = v[2].x - v[0].x, acy = v[2].y - v[0].y, acz = v[2].z - v[0].z;

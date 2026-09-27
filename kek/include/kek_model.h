@@ -31,14 +31,11 @@ typedef struct KEK_model_face_uv {
     KEK_FVec2 a, b, c;
 } KEK_model_face_uv;
 
-typedef struct KEK_model_face_normal {
-    KEK_FVec3 a, b, c;
-} KEK_model_face_normal;
-
+/* No normals: flat shading derives a face's normal from its vertices at draw
+   time, so a stored one would be 36 bytes per face that nothing reads. */
 struct KEK_model {
     KEK_FVec3* verts;
     KEK_model_face* faces;
-    KEK_model_face_normal* face_normals;
     uint8_t* face_colors;
     KEK_model_face_uv* face_textures;
     /* A handle rather than a KEK_texture*: the pool slot behind a raw pointer
@@ -51,12 +48,11 @@ struct KEK_model {
     uint8_t owns_texture;
     uint32_t verts_count;
     uint32_t faces_count;
-    uint32_t face_normals_count;
     uint32_t colors_count;
     uint32_t textures_count;
 };
 
-/* Which per-face arrays a model has beyond vertices, faces and normals. */
+/* Which per-face arrays a model has beyond vertices and faces. */
 #define KEK_MODEL_FACE_COLORS 1u
 #define KEK_MODEL_FACE_UVS 2u
 
@@ -68,7 +64,7 @@ struct KEK_model {
    KEK_MODEL_HANDLE_INVALID when the arena or the handle table is full. */
 KEK_ModelHandle kek_model_create(KEK_engine* e, uint32_t verts_count, uint32_t faces_count, unsigned flags);
 /* A model of the source's size with the source's contents. Counts past
-   faces_count for normals, colours or UVs are refused. */
+   faces_count for colours or UVs are refused. */
 KEK_ModelHandle kek_model_clone(KEK_engine* e, const KEK_model* source);
 KEK_model* kek_model_get(KEK_engine* e, KEK_ModelHandle handle);
 void kek_model_destroy(KEK_engine* e, KEK_ModelHandle handle);

@@ -39,7 +39,7 @@ name it was opened under.
 | 6 | 2 | `flags` | see below |
 | 8 | 2 | `vertices_count` | 1..65535, must be non-zero |
 | 10 | 2 | `faces_count` | 1..65535, must be non-zero |
-| 12 | 2 | `normals_count` | 0 means "derive them" |
+| 12 | 2 | `normals_count` | 0 when the file stores none |
 | 14 | 2 | `uv_count` | 0 when the model is untextured |
 | 16 | 2 | `reserved` | written as 0 |
 | 18 | 1 | `texture_name_size` | bytes of the name that follows, *including* its NUL. 0 when there is none |
@@ -58,8 +58,8 @@ name it was opened under.
    `\0`. Absent when the size is 0. It is a path resolved by the same
    `KEK_AssetProvider` the model came from, not a path relative to the model.
 2. **Vertices** — `vertices_count` × 12 bytes, each `float x, y, z`.
-3. **Normals** — `normals_count` × 12 bytes, same shape. Unit length is
-   expected but re-normalised on load anyway.
+3. **Normals** — `normals_count` × 12 bytes, same shape, unit length. The
+   engine shades flat and reads past them; see below.
 4. **UVs** — `uv_count` × 8 bytes, each `float u, v`.
 5. **Faces** — `faces_count` × 18 bytes. A face is three vertices, each of
    which is three `uint16` indices in the order `vertex`, `normal`, `uv`.
@@ -89,15 +89,13 @@ vertex has to say `0xFFFF`, because no index is below zero.
 
 ### What the loader does, not what the file says
 
-- **Normals are expanded to three per face.** In memory a face carries a normal
-  per corner (`KEK_model_face_normal`), whatever the file stored. With
-  `normals_count == 0` the loader computes one flat normal per face from the
-  cross product of its edges and writes it into all three; with indexed
-  normals, a corner whose index is `0xFFFF` falls back to that same computed
-  normal. This is the single largest array in the engine and Tier 2 of the
-  backlog is about undoing it.
-- **UVs are expanded to three per face** in the same way, so `face_textures`
-  is sized by `faces_count`, not by `uv_count`.
+- **Normals are not kept.** Their indices are checked as above, and the
+  normals themselves are read past without being staged: a `KEK_model` has no
+  normals, because flat shading derives a face's normal from its vertices at
+  draw time. They stay in the format for smooth shading, should it come, and
+  cost the file 12 bytes each, not the engine.
+- **UVs are expanded to three per face**, a pair per corner whatever the file
+  indexed, so `face_textures` is sized by `faces_count`, not by `uv_count`.
 - **Missing UVs become NaN.** Under `HAS_TEXTURE`, a corner with no UV index
   gets `{NAN, NAN}` rather than `{0, 0}`, so it is visibly wrong rather than
   quietly sampling the corner of the texture.

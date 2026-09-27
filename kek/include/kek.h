@@ -91,7 +91,7 @@ typedef struct KEK_desc {
     (((size_t)(n) + (KEK_MEMORY_ALIGN - 1u)) & ~(size_t)(KEK_MEMORY_ALIGN - 1u))
 /* Room for the default cube and texture, which kek_init creates in the arena.
    test_memory proves it is enough. */
-#define KEK_MEMORY_BUILTIN_ 2048u
+#define KEK_MEMORY_BUILTIN_ 1024u
 #define KEK_MEMORY_SIZE_FOR_(width, height, models, textures) \
     ((size_t)(KEK_MEMORY_ALIGN - 1u) \
      + KEK_MEMORY_ROUND_((size_t)(width) * (size_t)(height)) \

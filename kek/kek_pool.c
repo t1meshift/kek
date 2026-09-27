@@ -30,13 +30,12 @@ static uint16_t kek_pool_generation(uint32_t handle) {
    boundary. Offsets into the block; absent arrays take no room. */
 typedef struct KEK_ModelLayout_ {
     size_t faces;
-    size_t normals;
     size_t colors;
     size_t uvs;
     size_t total;
 } KEK_ModelLayout_;
 
-/* No array gets past an eighth of SIZE_MAX, so the five of them, rounded, add
+/* No array gets past an eighth of SIZE_MAX, so the four of them, rounded, add
    up without wrapping — a limit that only a 32-bit target can reach. */
 static int kek_pool_array_size_(uint32_t count, size_t element, size_t* out) {
     if (count > (SIZE_MAX / 8u) / element) {
@@ -48,18 +47,16 @@ static int kek_pool_array_size_(uint32_t count, size_t element, size_t* out) {
 
 static int kek_pool_model_layout_(uint32_t verts_count, uint32_t faces_count, unsigned flags,
                                   KEK_ModelLayout_* out) {
-    size_t verts, faces, normals, colors = 0, uvs = 0;
+    size_t verts, faces, colors = 0, uvs = 0;
 
     if (!kek_pool_array_size_(verts_count, sizeof(KEK_FVec3), &verts) ||
         !kek_pool_array_size_(faces_count, sizeof(KEK_model_face), &faces) ||
-        !kek_pool_array_size_(faces_count, sizeof(KEK_model_face_normal), &normals) ||
         ((flags & KEK_MODEL_FACE_COLORS) && !kek_pool_array_size_(faces_count, 1u, &colors)) ||
         ((flags & KEK_MODEL_FACE_UVS) && !kek_pool_array_size_(faces_count, sizeof(KEK_model_face_uv), &uvs))) {
         return 0;
     }
     out->faces = verts;
-    out->normals = out->faces + faces;
-    out->colors = out->normals + normals;
+    out->colors = out->faces + faces;
     out->uvs = out->colors + colors;
     out->total = out->uvs + uvs;
     return 1;
@@ -264,14 +261,12 @@ KEK_ModelHandle kek_model_create(KEK_engine* e, uint32_t verts_count, uint32_t f
        block, which is what makes these casts sound. */
     mdl->verts = (KEK_FVec3*)data;
     mdl->faces = (KEK_model_face*)(data + layout.faces);
-    mdl->face_normals = (KEK_model_face_normal*)(data + layout.normals);
     mdl->face_colors = (flags & KEK_MODEL_FACE_COLORS) ? data + layout.colors : 0;
     mdl->face_textures = (flags & KEK_MODEL_FACE_UVS) ? (KEK_model_face_uv*)(data + layout.uvs) : 0;
     mdl->texture = KEK_TEXTURE_HANDLE_INVALID;
     mdl->owns_texture = 0;
     mdl->verts_count = verts_count;
     mdl->faces_count = faces_count;
-    mdl->face_normals_count = faces_count;
     mdl->colors_count = (flags & KEK_MODEL_FACE_COLORS) ? faces_count : 0;
     mdl->textures_count = (flags & KEK_MODEL_FACE_UVS) ? faces_count : 0;
     slot->block = block;
@@ -283,17 +278,15 @@ KEK_ModelHandle kek_model_clone(KEK_engine* e, const KEK_model* source) {
     KEK_ModelHandle handle;
     KEK_model* mdl;
     unsigned flags = 0;
-    uint32_t normals_count, colors_count, textures_count;
+    uint32_t colors_count, textures_count;
 
     if (!source || !source->verts || !source->faces) {
         return KEK_MODEL_HANDLE_INVALID;
     }
-    normals_count = source->face_normals ? source->face_normals_count : 0;
     colors_count = source->face_colors ? source->colors_count : 0;
     textures_count = source->face_textures ? source->textures_count : 0;
     /* Every per-face array is sized by faces_count, here and in the source. */
-    if (normals_count > source->faces_count || colors_count > source->faces_count ||
-        textures_count > source->faces_count) {
+    if (colors_count > source->faces_count || textures_count > source->faces_count) {
         return KEK_MODEL_HANDLE_INVALID;
     }
     if (colors_count > 0) {
@@ -311,16 +304,12 @@ KEK_ModelHandle kek_model_clone(KEK_engine* e, const KEK_model* source) {
 
     memcpy(mdl->verts, source->verts, sizeof(mdl->verts[0]) * source->verts_count);
     memcpy(mdl->faces, source->faces, sizeof(mdl->faces[0]) * source->faces_count);
-    if (normals_count > 0) {
-        memcpy(mdl->face_normals, source->face_normals, sizeof(mdl->face_normals[0]) * normals_count);
-    }
     if (colors_count > 0) {
         memcpy(mdl->face_colors, source->face_colors, colors_count);
     }
     if (textures_count > 0) {
         memcpy(mdl->face_textures, source->face_textures, sizeof(mdl->face_textures[0]) * textures_count);
     }
-    mdl->face_normals_count = normals_count;
     mdl->colors_count = colors_count;
     mdl->textures_count = textures_count;
     /* The clone points at the same texture but never owns it — only the

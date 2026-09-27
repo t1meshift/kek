@@ -140,10 +140,9 @@ static Corner corner(uint16_t vertex, uint16_t normal, uint16_t uv) {
     return result;
 }
 
-/* A unit quad in z = 0 as two faces, textured and coloured, with a stored
-   normal that is deliberately not unit length (the loader renormalises), a
-   corner with no normal (it falls back to the face normal) and a corner with
-   no UV (it becomes NaN). */
+/* A unit quad in z = 0 as two faces, textured and coloured, with two stored
+   normals (the loader checks their indices and skips them), a corner with no
+   normal and a corner with no UV (it becomes NaN). */
 static void good_model(void) {
     memcpy(kmf.magic, "KMDL", 4);
     kmf.version = 1;
@@ -298,18 +297,10 @@ void test_a_textured_model_round_trips(void) {
     TEST_ASSERT_EQUAL_UINT8(40, mdl->face_colors[0]);
     TEST_ASSERT_EQUAL_UINT8(41, mdl->face_colors[1]);
 
-    /* Three normals per face whatever the file stored: indexed ones
-       renormalised, and the missing one the flat face normal. */
-    TEST_ASSERT_EQUAL_UINT32(2, mdl->face_normals_count);
-    assert_vec3(0.f, 0.f, 1.f, mdl->face_normals[0].a);
-    assert_vec3(0.f, 0.f, 1.f, mdl->face_normals[0].b);
-    assert_vec3(0.f, 0.6f, 0.8f, mdl->face_normals[0].c);
-    assert_vec3(0.f, 0.f, 1.f, mdl->face_normals[1].a);
-    assert_vec3(0.f, 0.f, 1.f, mdl->face_normals[1].b);
-    assert_vec3(0.f, 0.6f, 0.8f, mdl->face_normals[1].c);
-
     /* UVs expanded per face corner; the corner without one is NaN, so it
-       reads as wrong rather than as the texture's corner. */
+       reads as wrong rather than as the texture's corner. They follow the
+       normals in the file, so they are also what shows the normals were
+       skipped by exactly their length. */
     TEST_ASSERT_EQUAL_UINT32(2, mdl->textures_count);
     assert_uv(0.f, 0.f, mdl->face_textures[0].a);
     assert_uv(1.f, 0.f, mdl->face_textures[0].b);
@@ -338,7 +329,7 @@ void test_destroying_a_loaded_model_gives_back_both_slots_and_their_memory(void)
     TEST_ASSERT_EQUAL_size_t(free_bytes, kek_arena_available(&e));
 }
 
-void test_a_bare_model_loads_with_derived_normals(void) {
+void test_a_bare_model_loads(void) {
     KEK_model* mdl;
 
     bare_model();
@@ -353,14 +344,30 @@ void test_a_bare_model_loads_with_derived_normals(void) {
     TEST_ASSERT_EQUAL_UINT32(KEK_TEXTURE_HANDLE_INVALID, mdl->texture);
     TEST_ASSERT_EQUAL_UINT8(0, mdl->owns_texture);
 
-    /* Counter-clockwise in x/y, so the cross product of the edges is +z. */
-    TEST_ASSERT_EQUAL_UINT32(2, mdl->face_normals_count);
-    assert_vec3(0.f, 0.f, 1.f, mdl->face_normals[0].a);
-    assert_vec3(0.f, 0.f, 1.f, mdl->face_normals[0].b);
-    assert_vec3(0.f, 0.f, 1.f, mdl->face_normals[0].c);
-    assert_vec3(0.f, 0.f, 1.f, mdl->face_normals[1].c);
-
     TEST_ASSERT_EQUAL_INT(free_textures, kek_test_free_textures(&e));
+}
+
+/* The skip reads normals in batches; a count that is not a whole number of
+   them has to come out at the same place as one that is. */
+void test_normals_are_skipped_whatever_their_count(void) {
+    const uint16_t counts[] = { 15, 16, 17, 33, LARGE + 1 };
+    KEK_model* mdl;
+    size_t i;
+
+    for (i = 0; i < sizeof(counts) / sizeof(counts[0]); ++i) {
+        KEK_ModelHandle handle;
+
+        good_model();
+        kmf.normals_count = counts[i];
+        write_kmf();
+        handle = load();
+        mdl = kek_model_get(&e, handle);
+        TEST_ASSERT_NOT_NULL(mdl);
+        assert_uv(1.f, 0.f, mdl->face_textures[0].b);
+        assert_uv(1.f, 1.f, mdl->face_textures[1].b);
+        TEST_ASSERT_EQUAL_UINT8(41, mdl->face_colors[1]);
+        kek_model_destroy(&e, handle);
+    }
 }
 
 /* Without HAS_TEXTURE the UV indices are not looked at, so an out-of-range one
@@ -625,7 +632,8 @@ int main(void) {
     RUN_TEST(test_the_documented_header_is_twenty_bytes);
     RUN_TEST(test_a_textured_model_round_trips);
     RUN_TEST(test_destroying_a_loaded_model_gives_back_both_slots_and_their_memory);
-    RUN_TEST(test_a_bare_model_loads_with_derived_normals);
+    RUN_TEST(test_a_bare_model_loads);
+    RUN_TEST(test_normals_are_skipped_whatever_their_count);
     RUN_TEST(test_uv_indices_are_ignored_without_a_texture);
     RUN_TEST(test_a_large_model_loads);
     RUN_TEST(test_a_textured_model_with_more_faces_than_uvs_loads);

@@ -14,49 +14,20 @@ static int kek_file_model_read_exact(KEK_AssetStream* stream, void* out_data, si
     return size > 0 && kek_asset_read(stream, out_data, size) == size;
 }
 
-static KEK_FVec3 kek_file_model_subtract(KEK_FVec3 a, KEK_FVec3 b) {
-    return (KEK_FVec3) {
-        .x = a.x - b.x,
-        .y = a.y - b.y,
-        .z = a.z - b.z
-    };
-}
+/* Reads past count records the model has no use for. Read rather than seek:
+   a short file then fails here, as it would reading them, and a stream without
+   seek still loads. */
+static int kek_file_model_skip_normals(KEK_AssetStream* stream, uint16_t count) {
+    KEK_FileModel_Normal scratch[16];
 
-static KEK_FVec3 kek_file_model_cross(KEK_FVec3 a, KEK_FVec3 b) {
-    return (KEK_FVec3) {
-        .x = a.y * b.z - a.z * b.y,
-        .y = a.z * b.x - a.x * b.z,
-        .z = a.x * b.y - a.y * b.x
-    };
-}
-
-static KEK_FVec3 kek_file_model_calculate_face_normal(
-    const KEK_FileModel_Vertex* vertices,
-    const KEK_FileModel_Face* face
-) {
-    KEK_FVec3 edge_ab = kek_file_model_subtract(vertices[face->v[1].vertex], vertices[face->v[0].vertex]);
-    KEK_FVec3 edge_ac = kek_file_model_subtract(vertices[face->v[2].vertex], vertices[face->v[0].vertex]);
-    KEK_FVec3 face_normal = kek_file_model_cross(edge_ab, edge_ac);
-    kek_normalize_fvec3(&face_normal);
-    return face_normal;
-}
-
-static void kek_file_model_generate_normals(
-    KEK_model* out_model,
-    const KEK_FileModel_Vertex* vertices,
-    const KEK_FileModel_Face* faces,
-    uint16_t faces_count
-) {
-    for (uint16_t i = 0; i < faces_count; ++i) {
-        KEK_FVec3 face_normal = kek_file_model_calculate_face_normal(vertices, &faces[i]);
-        out_model->face_normals[i] = (KEK_model_face_normal) {
-            .a = face_normal,
-            .b = face_normal,
-            .c = face_normal
-        };
+    while (count > 0) {
+        uint16_t n = count < 16u ? count : 16u;
+        if (!kek_file_model_read_exact(stream, scratch, sizeof(scratch[0]) * n)) {
+            return 0;
+        }
+        count = (uint16_t)(count - n);
     }
-
-    out_model->face_normals_count = faces_count;
+    return 1;
 }
 
 /* The file is staged whole before any of it reaches the model, because it has
@@ -72,7 +43,6 @@ static KEK_ModelHandle kek_file_model_load_(KEK_engine *e, const char *path) {
     KEK_ModelHandle model_handle;
     KEK_model* out_model;
     KEK_FileModel_Vertex* vertices;
-    KEK_FileModel_Normal* normals;
     KEK_FileModel_UV* uvs;
     KEK_FileModel_Face* faces;
     char texture_name[256];
@@ -106,10 +76,9 @@ static KEK_ModelHandle kek_file_model_load_(KEK_engine *e, const char *path) {
     }
 
     vertices = (KEK_FileModel_Vertex*)kek_arena_temp(&e->arena, sizeof(vertices[0]) * hdr.vertices_count);
-    normals = (KEK_FileModel_Normal*)kek_arena_temp(&e->arena, sizeof(normals[0]) * hdr.normals_count);
     uvs = (KEK_FileModel_UV*)kek_arena_temp(&e->arena, sizeof(uvs[0]) * hdr.uv_count);
     faces = (KEK_FileModel_Face*)kek_arena_temp(&e->arena, sizeof(faces[0]) * hdr.faces_count);
-    if (!vertices || !normals || !uvs || !faces) {
+    if (!vertices || !uvs || !faces) {
         kek_asset_close(&stream);
         return KEK_MODEL_HANDLE_INVALID;
     }
@@ -135,8 +104,10 @@ static KEK_ModelHandle kek_file_model_load_(KEK_engine *e, const char *path) {
         return KEK_MODEL_HANDLE_INVALID;
     }
 
-    if (hdr.normals_count > 0 &&
-        !kek_file_model_read_exact(&stream, normals, sizeof(normals[0]) * hdr.normals_count)) {
+    /* Normals are in the format for smooth shading, which the engine does not
+       do: their indices are still checked below, but the normals themselves
+       are not kept. */
+    if (!kek_file_model_skip_normals(&stream, hdr.normals_count)) {
         kek_asset_close(&stream);
         return KEK_MODEL_HANDLE_INVALID;
     }
@@ -170,7 +141,6 @@ static KEK_ModelHandle kek_file_model_load_(KEK_engine *e, const char *path) {
     memcpy(out_model->verts, vertices, sizeof(vertices[0]) * hdr.vertices_count);
     out_model->verts_count = hdr.vertices_count;
     out_model->faces_count = hdr.faces_count;
-    out_model->face_normals_count = 0;
     out_model->colors_count = 0;
     out_model->textures_count = 0;
     out_model->texture = KEK_TEXTURE_HANDLE_INVALID;
@@ -203,32 +173,6 @@ static KEK_ModelHandle kek_file_model_load_(KEK_engine *e, const char *path) {
             .b = faces[i].v[1].vertex,
             .c = faces[i].v[2].vertex
         };
-    }
-
-    if (hdr.normals_count > 0) {
-        for (uint16_t i = 0; i < hdr.faces_count; ++i) {
-            KEK_model_face_normal* face_normal = &out_model->face_normals[i];
-            KEK_FVec3 fallback_normal = kek_file_model_calculate_face_normal(vertices, &faces[i]);
-            for (uint16_t j = 0; j < 3; ++j) {
-                uint16_t normal_index = faces[i].v[j].normal;
-                KEK_FVec3 normal;
-
-                if (normal_index == KEK_FILEMODEL_INDEX_NONE) {
-                    normal = fallback_normal;
-                } else {
-                    normal = normals[normal_index];
-                    kek_normalize_fvec3(&normal);
-                }
-
-                if (j == 0) face_normal->a = normal;
-                if (j == 1) face_normal->b = normal;
-                if (j == 2) face_normal->c = normal;
-            }
-        }
-
-        out_model->face_normals_count = hdr.faces_count;
-    } else {
-        kek_file_model_generate_normals(out_model, vertices, faces, hdr.faces_count);
     }
 
     if ((hdr.flags & KEK_FILEMODEL_HAS_FACE_COLORS) != 0) {

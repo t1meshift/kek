@@ -34,21 +34,6 @@ static KEK_model_face kek_cube_faces_[] = {
     {2, 0, 1}
 };
 
-static KEK_model_face_normal kek_cube_face_normals_[] = {
-    {{1.f, 0.f, 0.f}, {1.f, 0.f, 0.f}, {1.f, 0.f, 0.f}},
-    {{1.f, 0.f, 0.f}, {1.f, 0.f, 0.f}, {1.f, 0.f, 0.f}},
-    {{-1.f, 0.f, 0.f}, {-1.f, 0.f, 0.f}, {-1.f, 0.f, 0.f}},
-    {{-1.f, 0.f, 0.f}, {-1.f, 0.f, 0.f}, {-1.f, 0.f, 0.f}},
-    {{0.f, 1.f, 0.f}, {0.f, 1.f, 0.f}, {0.f, 1.f, 0.f}},
-    {{0.f, 1.f, 0.f}, {0.f, 1.f, 0.f}, {0.f, 1.f, 0.f}},
-    {{0.f, -1.f, 0.f}, {0.f, -1.f, 0.f}, {0.f, -1.f, 0.f}},
-    {{0.f, -1.f, 0.f}, {0.f, -1.f, 0.f}, {0.f, -1.f, 0.f}},
-    {{0.f, 0.f, 1.f}, {0.f, 0.f, 1.f}, {0.f, 0.f, 1.f}},
-    {{0.f, 0.f, 1.f}, {0.f, 0.f, 1.f}, {0.f, 0.f, 1.f}},
-    {{0.f, 0.f, -1.f}, {0.f, 0.f, -1.f}, {0.f, 0.f, -1.f}},
-    {{0.f, 0.f, -1.f}, {0.f, 0.f, -1.f}, {0.f, 0.f, -1.f}}
-};
-
 static uint8_t kek_cube_colors_[] = {
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
 };
@@ -142,7 +127,6 @@ static KEK_model_face_uv kek_vts_[] = {
 KEK_model KEK_CUBE_MODEL = {
     .verts = kek_cube_verts_,
     .faces = kek_cube_faces_,
-    .face_normals = kek_cube_face_normals_,
     .face_colors = kek_cube_colors_,
     .face_textures = kek_vts_,
     /* Texture handles only exist once a pool does; kek_pool_init hands the
@@ -151,7 +135,6 @@ KEK_model KEK_CUBE_MODEL = {
     .owns_texture = 0,
     .verts_count = 8,
     .faces_count = 12,
-    .face_normals_count = 12,
     .colors_count = 12,
     .textures_count = 12
 };

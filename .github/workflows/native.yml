@@ -52,8 +52,10 @@ jobs:
       - uses: actions/checkout@v4
 
       # No system SDL3 on the runner, so CMake fetches and builds it from
-      # source. These are what its Linux video backends need; without them SDL3
-      # still builds, but only with the dummy driver.
+      # source. These are what its Linux video backends need. Wayland and the
+      # rest are optional, but once libx11-dev is there SDL3 refuses to
+      # configure without each X11 extension it wants: Xcursor, Xext (DBE,
+      # shape, sync), Xi, Xfixes, Xrandr, XScrnSaver and XTest.
       - name: Install SDL3 build dependencies
         if: runner.os == 'Linux'
         run: |
@@ -61,7 +63,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             ninja-build \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
-            libxi-dev libxfixes-dev libxss-dev \
+            libxi-dev libxfixes-dev libxss-dev libxtst-dev \
             libwayland-dev wayland-protocols libxkbcommon-dev \
             libdecor-0-dev libegl1-mesa-dev libgl1-mesa-dev
 
@@ -116,7 +118,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             clang-tidy-${CLANG_TIDY_VERSION} ninja-build \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
-            libxi-dev libxfixes-dev libxss-dev \
+            libxi-dev libxfixes-dev libxss-dev libxtst-dev \
             libwayland-dev wayland-protocols libxkbcommon-dev \
             libdecor-0-dev libegl1-mesa-dev libgl1-mesa-dev
 

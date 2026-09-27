@@ -25,6 +25,14 @@ typedef struct KEK_camera {
 
 extern KEK_camera KEK_DEFAULT_CAMERA;
 
+/* The depth buffer holds 1/z times this, in a uint16_t: larger is nearer, and
+   0 is the clear, which anything drawn is nearer than. 65535 is z = 0.1, the
+   default camera's near plane; anything nearer than that saturates there, and
+   anything past ~6,500 comes out as 1, the farthest a pixel can be. Being 1/z,
+   the steps grow with the square of the distance: 0.015 of a unit apart at
+   z = 10, 1.5 at z = 100. */
+#define KEK_3D_DEPTH_SCALE 6553.5f
+
 typedef struct KEK_3D_ProjectedVertex {
     KEK_IVec2 screen;
     float depth;

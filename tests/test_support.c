@@ -117,7 +117,7 @@ void kek_test_file_patch_u16(KEK_TestFile* file, size_t offset, uint16_t value) 
 
 /* Guards on both sides, plus room for the largest frame a test attaches. */
 static uint8_t kek_test_fb[KEK_TEST_FRAME_GUARD + KEK_TEST_FRAME_MAX_PIXELS + KEK_TEST_FRAME_GUARD];
-static float kek_test_db[KEK_TEST_FRAME_GUARD + KEK_TEST_FRAME_MAX_PIXELS + KEK_TEST_FRAME_GUARD];
+static uint16_t kek_test_db[KEK_TEST_FRAME_GUARD + KEK_TEST_FRAME_MAX_PIXELS + KEK_TEST_FRAME_GUARD];
 static size_t kek_test_frame_pixels;
 
 void kek_test_frame_attach(KEK_engine* e, uint16_t w, uint16_t h) {
@@ -155,9 +155,9 @@ void kek_test_frame_assert_guards(void) {
         "framebuffer written before its first pixel");
     kek_test_assert_guard_bytes(kek_test_fb + used, sizeof(kek_test_fb) - used,
         "framebuffer written past its last pixel");
-    kek_test_assert_guard_bytes(db_bytes, KEK_TEST_FRAME_GUARD * sizeof(float),
+    kek_test_assert_guard_bytes(db_bytes, KEK_TEST_FRAME_GUARD * sizeof(uint16_t),
         "depth buffer written before its first entry");
-    kek_test_assert_guard_bytes(db_bytes + used * sizeof(float), sizeof(kek_test_db) - used * sizeof(float),
+    kek_test_assert_guard_bytes(db_bytes + used * sizeof(uint16_t), sizeof(kek_test_db) - used * sizeof(uint16_t),
         "depth buffer written past its last entry");
 }
 

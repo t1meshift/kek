@@ -98,6 +98,28 @@ void test_the_far_surface_shows_where_nothing_nearer_is(void) {
     kek_test_frame_assert_guards();
 }
 
+/* The depth buffer is 1/z in 16 bits: past its range a surface is as far as a
+   pixel can be, which is still nearer than the clear. */
+static void square_at(float depth, uint8_t color) {
+    flat(vertex(40, 30, depth), vertex(140, 30, depth), vertex(40, 130, depth), color);
+    flat(vertex(140, 30, depth), vertex(140, 130, depth), vertex(40, 130, depth), color);
+}
+
+void test_a_surface_past_the_depth_range_still_draws(void) {
+    square_at(1.e6f, FAR_INK);
+    TEST_ASSERT_GREATER_THAN_INT(0, kek_test_frame_count(&e, FAR_INK));
+    kek_test_frame_assert_guards();
+}
+
+/* Nearer than the near plane saturates rather than wrapping round to far. */
+void test_a_surface_nearer_than_the_depth_range_stays_nearest(void) {
+    square_at(0.001f, NEAR_INK);
+    square_at(2.f, FAR_INK);
+    TEST_ASSERT_GREATER_THAN_INT(0, kek_test_frame_count(&e, NEAR_INK));
+    TEST_ASSERT_EQUAL_INT(0, kek_test_frame_count(&e, FAR_INK));
+    kek_test_frame_assert_guards();
+}
+
 void test_a_vertex_blit_respects_depth_and_the_frame(void) {
     near_square(NEAR_INK);
 
@@ -492,6 +514,8 @@ int main(void) {
     RUN_TEST(test_the_nearer_surface_wins_drawn_last);
     RUN_TEST(test_the_nearer_surface_wins_drawn_first);
     RUN_TEST(test_the_far_surface_shows_where_nothing_nearer_is);
+    RUN_TEST(test_a_surface_past_the_depth_range_still_draws);
+    RUN_TEST(test_a_surface_nearer_than_the_depth_range_stays_nearest);
     RUN_TEST(test_a_vertex_blit_respects_depth_and_the_frame);
     RUN_TEST(test_triangles_wholly_off_each_edge_draw_nothing);
     RUN_TEST(test_triangles_hanging_off_every_edge_stay_in_the_frame);

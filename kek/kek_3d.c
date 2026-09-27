@@ -21,8 +21,24 @@ KEK_camera KEK_DEFAULT_CAMERA = {
     .far_plane = 1000.f
 };
 
-static char kek_3d_depth_test(KEK_engine* engine, uint16_t x, uint16_t y, float depth) {
+/* 1/z as the depth buffer holds it. NaN, and whatever rounds below 1, is the
+   farthest a pixel can be rather than the clear, so it still draws on an
+   empty frame, as it did while the buffer was float. */
+static uint16_t kek_3d_depth_quantise(float inv_z) {
+    float depth = inv_z * KEK_3D_DEPTH_SCALE;
+
+    if (!(depth >= 1.f)) {
+        return 1;
+    }
+    if (depth >= 65535.f) {
+        return 65535;
+    }
+    return (uint16_t)depth;
+}
+
+static char kek_3d_depth_test(KEK_engine* engine, uint16_t x, uint16_t y, float inv_z) {
     uint32_t index = (uint32_t)y * (uint32_t)engine->w + (uint32_t)x;
+    uint16_t depth = kek_3d_depth_quantise(inv_z);
 
     if (depth <= engine->db[index]) {
         return 0;

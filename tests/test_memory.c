@@ -134,11 +134,11 @@ void test_the_engine_stays_inside_its_block_at_any_alignment(void) {
         TEST_ASSERT_EQUAL_UINT16(W, e.w);
         TEST_ASSERT_EQUAL_UINT16(H, e.h);
         TEST_ASSERT_TRUE(inside(e.fb, pixels, block, size));
-        TEST_ASSERT_TRUE(inside(e.db, pixels * sizeof(float), block, size));
+        TEST_ASSERT_TRUE(inside(e.db, pixels * sizeof(uint16_t), block, size));
         TEST_ASSERT_TRUE(inside(e.palette, 256 * sizeof(KEK_palette_item), block, size));
         TEST_ASSERT_TRUE(inside(e.shading_palette, (size_t)256 * KEK_PALETTE_SHADING_LEVELS, block, size));
-        TEST_ASSERT_TRUE(disjoint(e.fb, pixels, e.db, pixels * sizeof(float)));
-        TEST_ASSERT_TRUE(disjoint(e.db, pixels * sizeof(float), e.palette, 256 * sizeof(KEK_palette_item)));
+        TEST_ASSERT_TRUE(disjoint(e.fb, pixels, e.db, pixels * sizeof(uint16_t)));
+        TEST_ASSERT_TRUE(disjoint(e.db, pixels * sizeof(uint16_t), e.palette, 256 * sizeof(KEK_palette_item)));
         TEST_ASSERT_TRUE(disjoint(e.palette, 256 * sizeof(KEK_palette_item),
                                   e.shading_palette, (size_t)256 * KEK_PALETTE_SHADING_LEVELS));
         TEST_ASSERT_EQUAL_UINT(0, (unsigned)((uintptr_t)e.db % KEK_MEMORY_ALIGN));
@@ -197,7 +197,7 @@ void test_the_frame_starts_cleared_and_the_palette_default(void) {
     init(&e);
     for (i = 0; i < (size_t)W * H; ++i) {
         TEST_ASSERT_EQUAL_UINT8(0, e.fb[i]);
-        TEST_ASSERT_EQUAL_FLOAT(0.f, e.db[i]);
+        TEST_ASSERT_EQUAL_UINT16(0, e.db[i]);
     }
     TEST_ASSERT_EQUAL_MEMORY(KEK_DEFAULT_PALETTE, e.palette, 256 * sizeof(KEK_palette_item));
 }

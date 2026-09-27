@@ -39,7 +39,7 @@ struct KEK_engine {
     KEK_palette_item* palette; /* 256-color palette */
     uint8_t* shading_palette;
     uint8_t* fb; /** framebuffer */
-    float* db; /** depth buffer */
+    uint16_t* db; /** depth buffer: 1/z, quantised — see KEK_3D_DEPTH_SCALE */
     uint16_t w; /** buffer width */
     uint16_t h; /** buffer height */
     uint16_t target_fps;
@@ -95,7 +95,7 @@ typedef struct KEK_desc {
 #define KEK_MEMORY_SIZE_FOR_(width, height, models, textures) \
     ((size_t)(KEK_MEMORY_ALIGN - 1u) \
      + KEK_MEMORY_ROUND_((size_t)(width) * (size_t)(height)) \
-     + KEK_MEMORY_ROUND_((size_t)(width) * (size_t)(height) * sizeof(float)) \
+     + KEK_MEMORY_ROUND_((size_t)(width) * (size_t)(height) * sizeof(uint16_t)) \
      + KEK_MEMORY_ROUND_(256u * sizeof(KEK_palette_item)) \
      + KEK_MEMORY_ROUND_((size_t)256u * (size_t)KEK_PALETTE_SHADING_LEVELS) \
      + KEK_MEMORY_ROUND_((size_t)(models) * sizeof(KEK_ModelPoolSlot)) \

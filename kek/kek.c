@@ -45,7 +45,7 @@ int kek_init(KEK_engine* e, const KEK_desc* desc, void* memory, size_t size) {
     result.next_scene = 0;
     result.assets = 0;
     result.fb = (uint8_t*)kek_memory_take_(&cursor, pixels);
-    result.db = (float*)kek_memory_take_(&cursor, pixels * sizeof(float));
+    result.db = (uint16_t*)kek_memory_take_(&cursor, pixels * sizeof(uint16_t));
     result.palette = (KEK_palette_item*)kek_memory_take_(&cursor, 256u * sizeof(KEK_palette_item));
     result.shading_palette = (uint8_t*)kek_memory_take_(&cursor, (size_t)256u * KEK_PALETTE_SHADING_LEVELS);
     result.w = desc->width;
@@ -136,9 +136,7 @@ void kek_request_scene(KEK_engine *e, KEK_scene *scene) {
 
 void kek_flush_buffers(KEK_engine* e) {
     memset(e->fb, 0, (size_t)e->w * e->h);
-    for (uint32_t i = 0; i < (uint32_t)e->w * (uint32_t)e->h; ++i) {
-        e->db[i] = 0.f;
-    }
+    memset(e->db, 0, (size_t)e->w * e->h * sizeof(uint16_t));
 }
 
 void kek_key_down(KEK_engine* e, uint16_t key) {

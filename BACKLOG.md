@@ -34,16 +34,15 @@ Nothing open. Tier 1 is next.
 The library builds alone and installs as a package, and the demo builds against it in CI. What is left
 is the memory.
 
-- **The library keeps its own storage.** Frame and depth buffers, the palette and the shading palette in
-  [kek.c](kek/kek.c), both pools in [kek_pool.c](kek/kek_pool.c), and two scratch buffers: the view-space
-  vertices in `kek_3d_draw_model` and the KMF loader's staging area. Their sizes come from `KEK_*`
-  compile definitions that are baked into the installed package, so one build of kek serves one set of
-  sizes and one engine per process. The application should hand all of it over at init — something like
-  `kek_init(&e, &config)` with the buffers, their dimensions and one block of memory for the rest.
-  Buffers first: the rasteriser already goes through `e->w`/`e->h`, and the tests already attach frames
-  of their own, so that part is close to mechanical. The pools come second, and they are Tier 2's arena
-  item with the arena's memory supplied by the application instead of a static array; the two are one
-  change, not two.
+- **The pools and two scratch buffers are still the library's own.** Both pools in
+  [kek_pool.c](kek/kek_pool.c), the view-space vertices in `kek_3d_draw_model` and the KMF loader's
+  staging area, sized by `KEK_*` compile definitions baked into the installed package, and shared by
+  every engine in the process: a second `kek_init` resets the first engine's pools. They go into the
+  block `kek_init` already takes, as the rest of it after the frame: that is Tier 2's arena item, done
+  next and ahead of the rest of Tier 2's order. The scratch buffers stop being buffers there —
+  temporary allocations off the top of the arena, released by mark, sized by the model actually in
+  hand instead of the worst case. `KEK_MEMORY_SIZE(w, h)` keeps its signature: the arena is whatever
+  the application adds on top.
 
 ## Tier 2 — Target machine: Pentium, running on a 486
 
@@ -104,6 +103,16 @@ roughly 20 KB of actual data.
   cross-cutting change and far easier on top of structures that have already shrunk.
 
 ## Tier 3 — Engine: prerequisites for levels
+
+- **Render to texture**, once the arena is in. A `KEK_texture` is palette indices, a byte per pixel, the
+  same as the frame, so binding a texture's pixels as the frame for a while and drawing into it with
+  the ordinary 2D and 3D calls gives security-camera monitors (the Build engine's `setviewtotile`) and
+  model thumbnails in the editor. The projection already takes its aspect from `e->w`/`e->h`. Two
+  things to get right: 3D needs a depth buffer the size of the texture, which should be a temporary
+  from the arena rather than the frame's own, since a scene half way through its main view has that
+  one half full; and textures are drawn before the view that shows them, or they show the last frame.
+  Nothing about it needs a `KEK_frame` type up front: `fb`, `db`, `w` and `h` are already the bound
+  frame, and a bind/restore pair of functions over them is the whole API.
 
 - **Fog never reaches black.** The shading palette's last row is 1/`KEK_PALETTE_SHADING_LEVELS` of the
   colour, not black, so a face past `fog_end` is dim but visible: at the default four levels, a quarter.
@@ -252,6 +261,7 @@ on the hash has the reasoning, the measurements and what was verified.
 | Platform layer wired to the game | `main_sdl.c` called the game's init from `<game.h>`, and the plan was a callback so a game could reuse it. The platform layer was never library code: it is the demo's, in `demo/platform`, and a game copies it. The stdio asset provider went with it rather than into `kek/io` | `8c104d4` |
 | Everything in one CMake project | The top-level CMakeLists built engine, game, platform layer and editor as one. It builds the library and its tests; the demo and the editor are projects of their own over `kek::kek`, and as someone's subdirectory kek builds the library alone | `8c104d4` |
 | Not installable | No install rules, no package. `cmake --install` and `find_package(kek)`; Native CI builds the demo against the install | `3b65957` |
+| Frame, depth and palettes in library statics | Sized by `KEK_BUFFER_WIDTH`/`HEIGHT`, which were baked into the package. `kek_init` takes a `KEK_desc` and one block from the application and lays all four out in it; `KEK_MEMORY_SIZE` sizes a static array for it | `747952e` |
 
 ### Tier 3
 

@@ -13,8 +13,8 @@ These shape several items below, so they are recorded once here.
 | Question | Decision |
 | --- | --- |
 | Licence | All rights reserved. The game lives in its own private repository; this one keeps the engine and a demo |
-| Target machine | Pentium as the primary target, able to run on a 486 |
-| Arithmetic | Fixed point. A 486 has no FPU/integer overlap, and a 486SX has no FPU at all |
+| Target machine | Pentium as the primary target, able to run on a 486DX. An FPU is required: no 486SX. 3D on FPU-less machines was all-integer engines with cut-down frames or rates (Ultima Underworld, Doom, Descent), and a 486SX-33 would be ~5 fps even so; building every stage without float for that is not worth it |
+| Arithmetic | Quake's split: float for geometry and triangle setup, integers in the span loop, `lrintf` at the boundary. Measured on 86Box (Tier 2): 16.16 geometry is slower than float on a Pentium and level with it on a 486DX; only a 486SX, emulating its FPU at ~200,000 cycles a vertex, would need it. Was fixed point throughout, for the 486SX |
 | Tests | Unity (ThrowTheSwitch), C99, fetched like SDL3 and Dear ImGui, driven by CTest. The harness has to build for foreign targets too, which rules out anything needing `fork` or a prebuilt library |
 | Frame comparison | No golden images while rendering is float — see the transcendentals item in Tier 3 |
 | Level format | `.klf`, magic `KLVL`, by analogy with `.kmf`/`KMDL` and `.kif`/`KIMG` |
@@ -34,7 +34,7 @@ Nothing open. Tier 2 is next.
 Nothing open. The library builds alone, installs as a package the demo builds against in CI, and
 keeps no storage of its own: everything is in the block the application hands `kek_init`.
 
-## Tier 2 — Target machine: Pentium, running on a 486
+## Tier 2 — Target machine: Pentium, running on a 486DX
 
 Budget: fit comfortably into ~4 MB including assets. The worst-case pools are gone (`16ffe9d`): a
 320×200 engine is a block of `KEK_MEMORY_SIZE(320, 200)` = 329,487 bytes on a 64-bit build and 326,927
@@ -69,31 +69,46 @@ case — long spans, one texture in cache, no triangle setup — so the real bud
 visible triangles, not thousands. The source is kept outside the repository for now, with the rest of
 the DOS setup (see the DOS layer item in Tier 7).
 
-- **A scanline rasteriser with a fixed-point span loop.** The ~15× between the engine and the table
+Geometry is small beside that, and float suits it. A second standalone loop — rotate, translate and
+project a vertex; set up a triangle's area and three attribute gradients — in cycles:
+
+| | Pentium 100 | 486DX2-66 | 486SX-33, FPU emulated |
+| --- | --- | --- | --- |
+| Vertex, float, `(int)` casts | 185 | 535 | 199,577 |
+| Vertex, float, `lrintf` | 157 | 539 | 200,131 |
+| Vertex, 16.16 | 243 | 543 | 568 |
+| Triangle, float | 375 (~515 with a true `fdiv`) | 1,351 | 526,084 |
+| Triangle, 16.16 | 633 | 1,079 | 1,102 |
+
+For 500 vertices and 300 triangles that is ~2.3 ms in float against ~3.1 in 16.16 on the Pentium, ~10
+against ~9 on the 486DX: a millisecond either way, in frames of 40 and 130. The Pentium's pipelined FPU
+beats its 10-cycle unpipelined `imul`, which is why Quake kept geometry in float. Only the 486SX
+separates them, at ~8 seconds a frame in float, and it is not a target (see Settled decisions).
+
+- **A scanline rasteriser with an integer span loop.** The ~15× between the engine and the table
   above is three things: the bounding-box walk, which visits every pixel of a triangle's box and tests
   coverage with six float compares (twice the pixels it paints for a typical triangle); float in the
   pixel loop, with a store and reload per stepped value on x87 and two float-to-int conversions per
   texel; and the per-pixel sampler call and `y * w + x` multiplies. Walking edges row by row and
   handing each row's stretch to an integer span loop — u, v and 1/z in 16.16, 16-bit depth, a pointer
-  stepped along the row, the shading row picked once per span — removes all three. It does not wait
-  for fixed point across the engine: vertices and setup can stay float and convert once per span, which
-  is what the measured loop does. Subsumes the sampler and stepped-float items in Tier 3.
+  stepped along the row, the shading row picked once per span — removes all three. Vertices and setup
+  stay float and convert once per span, as the measured loop does, with `lrintf` rather than a cast:
+  under `-fno-math-errno` it is a single `fistp` in the current rounding mode, where a cast is an
+  `fldcw` pair around it, 30 cycles a vertex on the Pentium. Putting the FPU in single precision for
+  the duration, as Quake did, would take the Pentium's `fdiv` from 39 cycles to 19; C99 has no way to
+  say that, so it is a few lines of platform code, and optional. Subsumes the sampler and stepped-float
+  items in Tier 3.
 - **UVs are the largest per-face array.** Indexed on disk, expanded in memory to a `KEK_FVec2` per
   corner: 24 bytes per face, twice the face's own indices. Indexed in memory they would be the distinct
   UVs at 8 bytes each plus three `uint16` per face. Whether that pays depends on how often real models
   share UVs between faces; measure on the demo's assets first.
 - **Quantise vertices.** Quake's MDL format stored positions as `uint8` with a per-model scale and offset —
-  four times smaller than float, and a natural step toward fixed point.
-- **Fixed point.** Go through a `kek_scalar` typedef and a small operation set, keeping the float build as
-  a reference to diff against during the transition. It reaches `KEK_FVec2`/`KEK_FVec3` and therefore
-  nearly every public struct, plus [kek_3d.c](kek/kek_3d.c), [kek_2d.c](kek/kek_2d.c),
-  [kek_math.c](kek/kek_math.c), the converters and the editor. On-disk formats can stay float and convert
-  at load — the loader already visits every vertex.
+  four times smaller than float. The transform takes them back to float with a multiply and an add
+  it can fold into the model's matrix.
 - **Order of work.** The arena went first, for Tier 1, and the per-pixel divides are gone (`0945961`).
   Next move depth to `uint16`: worth doing regardless of arithmetic, depth is three quarters of the
   block, and the span loop wants it. Then the scanline rasteriser, which is where the speed is. Then the
-  data structures. Fixed point across the engine last — it is the most cross-cutting change, far easier
-  on top of structures that have already shrunk, and no longer on the critical path for speed.
+  data structures. Fixed point across the engine is no longer on the list (see Settled decisions).
 
 ## Tier 3 — Engine: prerequisites for levels
 
@@ -139,7 +154,10 @@ the DOS setup (see the DOS layer item in Tier 7).
   `sqrtf`, `floorf`, `fabsf`. Table-driven replacements drop the libm dependency and, more importantly,
   make rendering bit-reproducible across toolchains — libm accuracy is not specified, unlike `+ - * /`
   and `sqrt`. Together with `-ffp-contract=off` and no fast-math this puts golden-frame tests back on the
-  table.
+  table — per instruction set, not across them: with geometry staying float (Settled decisions), x87
+  and SSE builds differ in intermediate precision, and the benchmark's checksums already do. The x87
+  frames matched bit for bit between a desktop `-m32 -mfpmath=387` build and DJGPP on 86Box, so one
+  set of golden frames for x87 and one for SSE would cover every target and the CI.
 
 ## Tier 4 — Levels (`.klf`)
 

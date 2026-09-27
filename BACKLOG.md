@@ -36,13 +36,14 @@ keeps no storage of its own: everything is in the block the application hands `k
 
 ## Tier 2 — Target machine: Pentium, running on a 486DX
 
-Budget: fit comfortably into ~4 MB including assets. The worst-case pools are gone (`16ffe9d`): a
-320×200 engine is a block of `KEK_MEMORY_SIZE(320, 200)` = 329,487 bytes on a 64-bit build and 326,927
-on a 32-bit one, plus whatever the application gives its arena. Nearly all of it is the frame:
+Budget: fit comfortably into ~4 MB including assets. The worst-case pools are gone (`16ffe9d`) and
+depth is 16 bits (`6da6808`): a 320×200 engine is a block of `KEK_MEMORY_SIZE(320, 200)` = 201,487
+bytes on a 64-bit build and 198,927 on a 32-bit one, plus whatever the application gives its arena.
+Nearly all of it is the frame:
 
 | | Bytes |
 | --- | --- |
-| Depth buffer, `float` | 256,000 |
+| Depth buffer, `uint16_t` | 128,000 |
 | Framebuffer | 64,000 |
 | Handle tables, 64 + 64 slots | 6,656 (64-bit), 4,096 (32-bit) |
 | Palette + shading palette | 1,792 |
@@ -60,7 +61,9 @@ loop is ~40 cycles. Measured on 86Box with a standalone span loop (a full-screen
 | The same without a depth buffer | 24 | 55 |
 | The same with the 4×4 dither | 38 | 84 |
 | Every pixel rejected by the depth test | 23 | 51 |
-| The engine today (`0945961`), the same wall | ~590 | ~1,290 |
+| The engine at `0945961`, the benchmark's full-screen wall (16×16 texture) | ~590 | ~1,290 |
+| The engine now (`035fd37`), the same wall | ~57 | ~130 |
+| The engine now, the same wall flat | ~17 | ~34 |
 
 A frame of that loop is ~26 ms of painted pixels on the Pentium, ~7 ms more for 1.5× overdraw that the
 depth test rejects, 2 ms of clear, 1–2 ms to copy to VGA over PCI: ~25 fps with ~5 ms left for geometry
@@ -85,30 +88,41 @@ against ~9 on the 486DX: a millisecond either way, in frames of 40 and 130. The 
 beats its 10-cycle unpipelined `imul`, which is why Quake kept geometry in float. Only the 486SX
 separates them, at ~8 seconds a frame in float, and it is not a target (see Settled decisions).
 
-- **A scanline rasteriser with an integer span loop.** The ~15× between the engine and the table
-  above is three things: the bounding-box walk, which visits every pixel of a triangle's box and tests
-  coverage with six float compares (twice the pixels it paints for a typical triangle); float in the
-  pixel loop, with a store and reload per stepped value on x87 and two float-to-int conversions per
-  texel; and the per-pixel sampler call and `y * w + x` multiplies. Walking edges row by row and
-  handing each row's stretch to an integer span loop — u, v and 1/z in 16.16, 16-bit depth, a pointer
-  stepped along the row, the shading row picked once per span — removes all three. Vertices and setup
-  stay float and convert once per span, as the measured loop does, with `lrintf` rather than a cast:
-  under `-fno-math-errno` it is a single `fistp` in the current rounding mode, where a cast is an
-  `fldcw` pair around it, 30 cycles a vertex on the Pentium. Putting the FPU in single precision for
-  the duration, as Quake did, would take the Pentium's `fdiv` from 39 cycles to 19; C99 has no way to
-  say that, so it is a few lines of platform code, and optional. Subsumes the sampler and stepped-float
-  items in Tier 3.
-- **UVs are the largest per-face array.** Indexed on disk, expanded in memory to a `KEK_FVec2` per
-  corner: 24 bytes per face, twice the face's own indices. Indexed in memory they would be the distinct
-  UVs at 8 bytes each plus three `uint16` per face. Whether that pays depends on how often real models
-  share UVs between faces; measure on the demo's assets first.
-- **Quantise vertices.** Quake's MDL format stored positions as `uint8` with a per-model scale and offset —
-  four times smaller than float. The transform takes them back to float with a multiply and an add
-  it can fold into the model's matrix.
-- **Order of work.** The arena went first, for Tier 1, and the per-pixel divides are gone (`0945961`).
-  Next move depth to `uint16`: worth doing regardless of arithmetic, depth is three quarters of the
-  block, and the span loop wants it. Then the scanline rasteriser, which is where the speed is. Then the
-  data structures. Fixed point across the engine is no longer on the list (see Settled decisions).
+- **What is left between the textured span and the table.** ~57 cycles a pixel against 34 on the
+  Pentium, ~130 against 77 on the 486, and most of the difference is per span of 16 pixels rather than
+  per pixel: spans of 64 take the wall from 38 ms to 29 on the Pentium and from 126 to 86 on the 486,
+  so a span costs ~300 and ~900 cycles where the standalone loop's cost ~100 and ~400. Per span there
+  is the divide, two float-to-int conversions and their clamps, and the loop's setup. Three things
+  would take from it, none measured yet:
+  - *`lrintf` rather than a cast*, under `-fno-math-errno`, where it is a single `fistp` in the current
+    rounding mode and a cast is an `fldcw` pair around one — 30 cycles a vertex on the Pentium, so
+    likely more than that a span. It is a flag every build of the library needs, DJGPP's included, or
+    `lrintf` is a libm call and slower than the cast; so it belongs with the DOS build file.
+  - *The FPU in single precision* while rasterising, as Quake did: the Pentium's `fdiv` from 39 cycles
+    to 19. C99 cannot say it, so it is a few lines of platform code, and optional.
+  - *The span loop itself* is ~30 instructions a pixel with most of its variables on the stack: x86-32
+    has seven registers and the loop wants more than a dozen. Quake's was assembly. A pointer walked
+    along the row instead of an index, or u and v packed into one register as some engines did for a
+    fixed texture size, would each take a register back.
+- **UVs are the largest per-face array** — `needs a decision`. Indexed on disk, expanded in memory to
+  a `KEK_FVec2` per corner: 24 bytes per face, twice the face's own indices. The demo's cat has 608
+  faces and 361 UVs in the file, 344 of them used: 14,592 bytes as expanded, 6,536 indexed — the 361
+  at 8 bytes plus three `uint16` per face. The face indices are `uint32_t` where KMF's counts are
+  16-bit, so `uint16_t` there takes another 3,648: the cat from 26,288 bytes in memory to 14,584.
+  The cost is a lookup per corner, beside ~157 cycles to transform a vertex.
+- **Quantise vertices** — `needs a decision`. Quake's MDL format stored positions as `uint8` with a
+  per-model scale and offset — four times smaller than float, 948 bytes for the cat instead of 3,792.
+  The transform takes them back to float with a multiply and an add it can fold into the model's
+  matrix. But the cat is 4.2 units long, so a step is 0.017 of a unit, and at the benchmark's cube
+  distance of 1.4 half a step is about a pixel: vertices would visibly swim as a model turns close up,
+  as Quake's did. `uint16` is half of float with no visible error; level geometry, when there is some,
+  wants float or 16 bits in any case.
+- **Order of work.** Done: the arena for Tier 1, the per-pixel divides (`0945961`), 16-bit depth
+  (`6da6808`) and the scanline rasteriser (`035fd37`). The two data-structure items are what remain,
+  and they wait on a call. What is left of the span is the rest of the speed budget: a full-screen
+  textured wall is 38 ms on the Pentium, ~26 fps before geometry, overdraw and the game, where the
+  table's loop would be ~26 ms. Fixed point across the engine is no longer on the list (see Settled
+  decisions).
 
 ## Tier 3 — Engine: prerequisites for levels
 
@@ -137,25 +151,10 @@ separates them, at ~8 seconds a frame in float, and it is not a target (see Sett
   DJGPP's libm, which is fdlibm in software, that is ~1,100 cycles a model on a Pentium 100 and ~3,500
   on a 486DX2-66, measured on 86Box. A view set once — `kek_3d_begin_view(e, camera)` or the camera
   cached in the engine — takes it off the per-model path. It changes the same signature as the
-  transform item above, so the two go together.
-- **The sampler is what a textured pixel costs now.** With the divides gone (`0945961`),
-  `kek_texture_sample` is a call into another file per pixel, a branch on the warp mode, `floorf` twice
-  under `REPEAT`, a clamp and two float-to-int conversions — each of those an `fldcw` pair on an x87
-  without SSE3, which is every target, and a 486's `FIST` is around 30 cycles on top. On an emulated
-  486DX2-66 the benchmark's textured quad is ~1,300 cycles per painted pixel against ~460 for the flat
-  one. Quake stepped s and t in 16.16 fixed point along the span and masked for wrap; the span loop
-  already has u and v stepping linearly, so it is the same shape. Goes away with the scanline
-  rasteriser in Tier 2, or could go first as a local change inside the span.
-- **Every stepped float goes through memory on x87.** The library builds as strict C99, which on x87
-  makes GCC round each `float` assignment by storing and reloading it (`-fexcess-precision=standard`),
-  so `w0 += step` in the pixel loop is an `fadd`, an `fstp` and an `fld`. `-fexcess-precision=fast`
-  took 20% off the flat quad and 10% off the textured one on the emulated 486. Not worth taking as a
-  flag: results would then depend on which values the compiler keeps in 80-bit registers, and the
-  frames already changed with it, which is the opposite of golden frames. An integer span loop (the
-  scanline rasteriser in Tier 2) makes it moot where it matters.
-- **The depth buffer is the single largest allocation.** 320×200×4 = 250 KB against 62.5 KB for the frame
-  itself. Quantised `1/z` in `uint16` halves it and cuts memory traffic in the hot loop. Quake used a
-  16-bit z-buffer at this resolution, and only for alias models.
+  transform item above, so the two go together. The view is also where the depth buffer's scale
+  belongs: `KEK_3D_DEPTH_SCALE` is a constant that puts 65535 at the default camera's near plane, 0.1,
+  so a camera with its near plane at 1 uses a tenth of the range. Taken from the view's near plane
+  instead, every camera would get all 16 bits.
 - **Own transcendentals.** libm calls across four files: `sinf`/`cosf` (18), `roundf` (4), `tanf` (2),
   `sqrtf` (2), `floorf`, `fabsf` (2). Table-driven replacements drop the libm dependency and, more
   importantly, make rendering bit-reproducible across toolchains — libm accuracy is not specified, unlike
@@ -173,9 +172,11 @@ separates them, at ~8 seconds a frame in float, and it is not a target (see Sett
   | `(int)` cast | 26 | 58 |
 
   Per frame that is small next to the pixels: trigonometry is per model (and mostly the camera's,
-  above), `sqrtf` per face in the light, ~1 ms and ~2.5 ms for 300 faces. The exception is `floorf`
-  twice per texel under `REPEAT`, ~33 ms of a full-screen wall on the Pentium, which the scanline
-  rasteriser's masked wrap removes. `sqrtf` has a cheap fix: `sqrtf` stays a library call even with
+  above), `sqrtf` per face in the light, ~1 ms and ~2.5 ms for 300 faces. `floorf` was twice per
+  texel under `REPEAT`, ~33 ms of a full-screen wall on the Pentium, until the scanline rasteriser
+  wrapped with a mask; it is left only where a span end lands past ±32,768 texels, and in the
+  per-pixel sampler that textures whose sides are not powers of two still go through. `sqrtf` has a
+  cheap fix: `sqrtf` stays a library call even with
   `-fno-math-errno`, but `(float)__builtin_sqrtl(x)` under it is one `fsqrt`, ~70 and ~85 cycles, and
   rounds to the same float (a 64-bit intermediate is more than the 2 × 24 + 2 bits double rounding of
   a square root needs to be harmless). The builtin is GCC and Clang only, so it wants a small helper
@@ -327,6 +328,7 @@ on the hash has the reasoning, the measurements and what was verified.
 | --- | --- | --- |
 | Worst-case slots | A model slot was 87,136 bytes whatever it held and a texture slot 65,560, ×90 and ×256 the defaults. A two-ended arena in the rest of the block: assets sized exactly from the low end, temporaries from the high end, a footer per block so that a destroy in any order gives the memory back once what is above it has gone, and `kek_arena_mark`/`kek_arena_release` for a level's lifetime. `kek_model_create` and `kek_texture_create` take sizes. Generations are unchanged | `16ffe9d` |
 | Normals nobody read | `KEK_model_face_normal` was 36 bytes per face, 432 of the default cube's 1,264, and neither drawing nor lighting read it. Gone from the model; the KMF loader checks normal indices and reads past the normals without staging them. The builtin reserve went from 2,048 to 1,024 with it | `01673ea` |
+| Bounding-box rasterisers | Both walked every pixel of a triangle's box with float edge functions, stepped float attributes through memory on x87 and sampled through a call per pixel: ~15× the standalone span loop. Edges walked row by row in exact integers, a span loop in 16.15 depth and 16.16 texels with masked wrap, perspective every 16 pixels. The benchmark's textured wall from ~1,290 cycles a pixel to ~130 on the 486, ~590 to ~57 on the Pentium; coverage the same, pixel for pixel | `035fd37` |
 
 ### Tier 3
 
@@ -335,6 +337,9 @@ on the hash has the reasoning, the measurements and what was verified.
 | Resolution hardcoded | `KEK_BUFFER_WIDTH`/`KEK_BUFFER_HEIGHT`/`KEK_TARGET_FPS` were `#define`s at the top of `kek.c`. In `kek_config.h` with the other knobs now, with CMake cache entries | `f99074d` |
 | No lighting | The shading palette was computed at init and `kek_3d_draw_model` never used it. Flat shading from a world-fixed directional light plus ambient, with the normal derived from the face; fog with view depth; Bayer 4×4 dither between rows | `424f69e` |
 | Divides in the per-pixel loop | Three per pixel in `kek_3d_triangle` (`w0 / area`), five in `kek_3d_triangle_textured` (and `u_over_z / inv_z`), and no way to measure them. A benchmark in `bench/`; one divide per triangle, attributes as planes stepped by adds, and perspective divided out every 16 pixels with affine spans between, as in Quake. On an emulated 486DX2-66 (86Box, DJGPP): flat quad 791 → 445 ms, textured quad 1,681 → 1,242 ms, textured cube 478 → 346 ms | `954cb4c`, `0945961` |
+| Depth buffer the largest allocation | A `float` per pixel, 256,000 of a 320×200 block's 329,487 bytes. 1/z in a `uint16_t`, scaled so 65535 is the default near plane, saturating at both ends; the block is 201,487 | `6da6808` |
+| The sampler per textured pixel | `kek_texture_sample` was a call per pixel with a branch on the warp mode, `floorf` twice under `REPEAT` and two conversions. The span loop steps u and v in 16.16 and masks for wrap; only textures whose sides are not powers of two still go through it | `035fd37` |
+| Stepped floats through memory on x87 | Strict C99 stored and reloaded every `float` the pixel loops stepped. Nothing in the span loops is float now | `035fd37` |
 
 ### Found on the way, not from a backlog item
 

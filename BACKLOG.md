@@ -65,7 +65,8 @@ loop is ~40 cycles. Measured on 86Box with a standalone span loop (a full-screen
 | The same with the 4×4 dither | 38 | 84 |
 | Every pixel rejected by the depth test | 23 | 51 |
 | The engine at `0945961`, the benchmark's full-screen wall (16×16 texture) | ~590 | ~1,290 |
-| The engine now (`035fd37`), the same wall | ~57 | ~130 |
+| The engine at `035fd37`, the same wall | ~57 | ~130 |
+| The engine now (`f50ba29`), the same wall | ~49 | not measured |
 | The engine now, the same wall flat | ~17 | ~34 |
 
 A frame of that loop is ~26 ms of painted pixels on the Pentium, ~7 ms more for 1.5× overdraw that the
@@ -91,26 +92,27 @@ against ~9 on the 486DX: a millisecond either way, in frames of 40 and 130. The 
 beats its 10-cycle unpipelined `imul`, which is why Quake kept geometry in float. Only the 486SX
 separates them, at ~8 seconds a frame in float, and it is not a target (see Settled decisions).
 
-- **What is left between the textured span and the table.** ~57 cycles a pixel against 34 on the
-  Pentium, ~130 against 77 on the 486, and most of the difference is per span of 16 pixels rather than
-  per pixel: spans of 64 take the wall from 38 ms to 29 on the Pentium and from 126 to 86 on the 486,
-  so a span costs ~300 and ~900 cycles where the standalone loop's cost ~100 and ~400. Per span there
-  is the divide, two float-to-int conversions and their clamps, and the loop's setup. Three things
-  would take from it, none measured yet:
-  - *`lrintf` rather than a cast*, under `-fno-math-errno`, where it is a single `fistp` in the current
-    rounding mode and a cast is an `fldcw` pair around one — 30 cycles a vertex on the Pentium, so
-    likely more than that a span. It is a flag every build of the library needs, DJGPP's included, or
-    `lrintf` is a libm call and slower than the cast; so it belongs with the DOS build file.
+- **What is left between the textured span and the table.** ~49 cycles a pixel on the Pentium against
+  38 for the standalone loop with the same dither. `f50ba29` took the span ends' conversions off x87's
+  `fldcw` (a double's mantissa rounds them instead), the variable shift out of the texel index and the
+  reloads out of the loop: from ~57. Measured on the Pentium only; timings there are `uclock()` now
+  (`50fc42e`). What might take the rest:
+  - *The span loop itself* is still ~35 instructions a pixel with most of its variables on the stack:
+    x86-32 has seven registers, DJGPP's GCC keeps one for the frame pointer, and the loop wants more
+    than a dozen. The standalone loop has its texture's size as a constant; the engine's is a mask in
+    memory. Quake's was assembly. `-fomit-frame-pointer` changed nothing visible in the loop's code.
+    u and v packed into one register, as some engines did for a fixed texture size, would take one
+    back.
   - *The FPU in single precision* while rasterising, as Quake did: the Pentium's `fdiv` from 39 cycles
-    to 19. C99 cannot say it, so it is a few lines of platform code, and optional.
-  - *The span loop itself* is ~30 instructions a pixel with most of its variables on the stack: x86-32
-    has seven registers and the loop wants more than a dozen. Quake's was assembly. A pointer walked
-    along the row instead of an index, or u and v packed into one register as some engines did for a
-    fixed texture size, would each take a register back.
+    to 19, once a span. C99 cannot say it, so it is a few lines of platform code, and optional.
+  - *`lrintf` rather than the casts left*, per row and per vertex: measured, about 1% on the quads and
+    3–4% on the cubes, not taken. It needs `-fno-math-errno` in every build of the library, or
+    `lrintf` is a libm call slower than the cast; and it rounds vertices to the nearest pixel, which
+    moves edges. The double-mantissa rounding the span ends use would do the same without a flag.
 - **Order of work.** Done: the arena for Tier 1, the per-pixel divides (`0945961`), 16-bit depth
   (`6da6808`), the scanline rasteriser (`035fd37`) and the models' storage (`fb92a44`). What is left
-  of the span is the rest of the speed budget: a full-screen textured wall is 38 ms on the Pentium,
-  ~26 fps before geometry, overdraw and the game, where the table's loop would be ~26 ms. Fixed point
+  of the span is the rest of the speed budget: a full-screen textured wall is 33 ms on the Pentium,
+  ~30 fps before geometry, overdraw and the game, where the table's loop would be ~26 ms. Fixed point
   across the engine is no longer on the list (see Settled decisions).
 
 ## Tier 3 — Engine: prerequisites for levels

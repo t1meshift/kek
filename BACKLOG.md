@@ -154,14 +154,16 @@ too. With the camera moved up so that the cat fills most of the frame, the paced
   The fill taken apart on the textured quad, 64,000 pixels in 33.5 ms on the Pentium: the clear 1.9,
   the setup and walk 0.2, the pixel loop 20.9 (33 cycles a pixel, 54 with a shade that varies), and
   10.5 for the spans' own setup, ~260 cycles for each of 4,000 spans, a third of the surface. It is
-  not the 64-bit conversions: taking them to 32 bits (`6eb5175`) saved 2–4%. It is the chain of
-  dependent x87 operations, divide, three multiplies, the magic-number rounding stored and read
-  back, that the loop cannot start before; Quake started the next divide before the current pixels,
-  which C cannot say (the value is stored before the call, and the store waits for the divide). What
-  does work is fewer spans: `KEK_3D_SPAN`, the pixels between divides, 16 by default, 32 makes the
-  quad 15% faster, the 300-triangle room 9% and 64 makes them 22% and 13%. The pictures differ at
-  32 by 4,600 pixels of the quad and 700 of the room, at 64 by 13,800 and 2,800, and at 64 the
-  lines of a near wall wobble. The cat, whose triangles are small, does not change.
+  not the 64-bit conversions: taking them to 32 bits (`6eb5175`) saved 2–4%. Where it goes is not
+  known. The guess is the chain of dependent x87 operations the loop cannot start before, the
+  divide, three multiplies, the magic-number rounding stored and read back; Quake started the next
+  divide before the current pixels. That guess cannot be tested on the emulated Pentium, which
+  prices a dependent `fdiv` at ~4 cycles instead of 39, so anything about divides wants the 486 or
+  real hardware. What does work is fewer spans: `KEK_3D_SPAN`, the pixels between divides, 32 by
+  default (16 was Quake's), which makes the quad 15% faster than 16, the 300-triangle room 9%; 64
+  makes them 22% and 13%. The pictures differ at 32 by 4,600 pixels of the quad and 700 of the
+  room, at 64 by 13,800 and 2,800, and at 64 the lines of a near wall wobble. The cat, whose
+  triangles are small, does not change.
 
 Geometry is small beside that, and float suits it. A second standalone loop — rotate, translate and
 project a vertex; set up a triangle's area and three attribute gradients — in cycles:

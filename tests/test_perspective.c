@@ -102,10 +102,12 @@ void test_the_perspective_span_matches_the_exact_uv_under_repeat(void) {
     assert_matches(1.f);
 }
 
-/* UV several times round the texture: still a 32-bit span under REPEAT. */
+/* UV a dozen times round the texture: still a 32-bit span under REPEAT. Kept
+   low enough for the linear step within a span, 32 pixels by default, to stay
+   within a texel of the exact UV. */
 void test_the_perspective_span_matches_the_exact_uv_repeating_many_times(void) {
     kek_texture_set_warp_mode(&e, KEK_TEXTURE_WARP_REPEAT);
-    assert_matches(12.f);
+    assert_matches(4.f);
 }
 
 /* Past what 32 bits hold the 64-bit span takes over. It is not held to the

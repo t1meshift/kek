@@ -688,15 +688,14 @@ static KEK_3D_RASTER_ALIGN_ void kek_3d_triangle_bounded_(KEK_engine* engine, KE
 
 /* Perspective-correct u and v are divided out every KEK_3D_SPAN pixels and
    stepped linearly in between, which is how Quake hid one divide behind
-   sixteen pixels. Within a span the texture is affine: at this resolution,
-   and with a span this short, the error is a fraction of a texel. A span's
-   setup is a chain of dependent x87 operations, the divide, the scaling and
-   the rounding, ~260 cycles on a Pentium whatever the span's length, so a
-   longer span is a faster surface and a less exact one: on the emulated
-   Pentium 100, 32 is 15% faster than 16 on a wall and 64 is 22%, at the
-   price of near walls that wobble at 64. Up to 64; KEK_3D_SPAN sets it. */
+   sixteen pixels. Within a span the texture is affine, and the error grows
+   with the square of its length. A span's setup costs ~260 cycles on the
+   emulated Pentium whatever the span's length, so a longer span is a faster
+   surface and a less exact one: there, 32 is 15% faster than 16 on a wall
+   and 64 is 22%, at the price of near walls that wobble at 64. Quake's 16 is
+   the exact end of it; 32 is the default. Up to 64; KEK_3D_SPAN sets it. */
 #ifndef KEK_3D_SPAN
-#define KEK_3D_SPAN 16
+#define KEK_3D_SPAN 32
 #endif
 KEK_STATIC_ASSERT_DECL(kek_3d_span_in_the_reciprocal_table, KEK_3D_SPAN >= 1 && KEK_3D_SPAN <= 64);
 

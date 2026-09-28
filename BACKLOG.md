@@ -139,12 +139,17 @@ too. With the camera moved up so that the cat fills most of the frame, the paced
   | 2,700 triangles | 90.1 | 11 |
   | 300, and a copy of the room behind the far wall | 60.1 | 17 |
 
-  Every scene fills the frame, so the 40 ms the 2,400 extra triangles cost is the triangle: ~17 µs
-  each, ~1,700 cycles, what the cat's setup, walk and row starts come to as well. The copy behind
-  the wall shows nothing and costs 10 ms, a fifth more: with no visibility test a level costs what
-  all of it costs, not what is seen. The fill is ~45 ms of the 50, ~70 cycles a pixel against the
-  ~50 of the ideal loop above. Width at any value takes the 300-triangle room to 42.8 ms, but on a
-  wall that is a texture swimming, so the perspective path stays past 48.
+  Every scene fills the frame, so what the 2,400 extra triangles cost, 40 ms, is not fill. Of the
+  2,700 only ~640 are drawn at any view; the rest are transformed, culled and dropped, and that
+  model side costs ~11 µs a submitted face (vertices, projection, culling, light): about 30 of the
+  94 ms. With no visibility test a level costs what all of it costs, not what is seen, which the
+  copy behind the wall shows too: nothing visible, 10 ms, a fifth more. The rest, taken apart on
+  the 2,700 room with the stages cut out in turn: a drawn triangle's setup ~1,700 cycles (three
+  divides for its UVs 210, `kek_3d_setup` 210, the u and v planes 390, `kek_3d_common` 490, the
+  fixed-point depth and shade 370), the walk ~100 cycles a row, then ~47 ms of row starts and
+  pixels, ~66 cycles a pixel against the ~50 of the ideal loop above. So the setup is ~10% of
+  such a frame and the fill half of it. Width at any value takes the 300-triangle room to 42.8
+  ms, but on a wall that is a texture swimming, so the perspective path stays past 48.
 
 Geometry is small beside that, and float suits it. A second standalone loop — rotate, translate and
 project a vertex; set up a triangle's area and three attribute gradients — in cycles:

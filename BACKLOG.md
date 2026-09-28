@@ -99,9 +99,27 @@ too. With the camera moved up so that the cat fills most of the frame, the paced
   and compares around them, for four pixels of ~40. Quake drew its models affine, with every
   attribute stepped down the edges in fixed point and no float or divide in a row at all
   (`d_polyse.c`), because on a model's small triangles the perspective error does not show. The same
-  here, chosen per triangle — where 1/z changes little across it, or it is a few pixels tall — would
-  take a row to ~100–150 cycles, and the cat from ~22 ms to ~8–10 by estimate. Large or deep
-  triangles, walls and floors, keep the perspective path. Next in line.
+  here, chosen per triangle by its width, took the cat from 25.8 to 21.6 ms (`62981cb`), not the
+  ~8–10 the estimate said: the row's divides were a small part of it. Large or deep triangles,
+  walls and floors, keep the perspective path. What was measured, on the emulated Pentium 100 with
+  the affine path in and parts of the frame cut out in turn (bench, `--assets`, 50 frames):
+
+  | Part of the cat's frame | ms |
+  | --- | --- |
+  | The clear | 1.9 |
+  | Vertices and faces: transform, normals, light, projection, culling | ~6.1 |
+  | Triangle setup | ~2.3 |
+  | Walking the edges, empty spans | ~1.6 |
+  | `kek_3d_row`, depth and shade at a row's start (before the change) | ~2.9 |
+  | A row's texture ends (before the change) | ~4.7 |
+  | The pixel loops and their memory | ~6.0 |
+
+  The first try, a row's ends from int64 planes, saved 0.8%: 64-bit multiplies are a libgcc call on
+  DJGPP, as costly as the divides they replaced. In 32 bits, modulo 2^32 for REPEAT and read signed
+  for CLAMP, it was 2.8 ms, and depth and shade as fixed-point planes instead of `kek_3d_row` 1.4
+  more. In the demo itself on the Pentium, uncapped: 31–40 fps before, 39–50 after. Frames differ
+  from the perspective ones by 5–12 pixels of 64,000. Width 16 rather than 48 costs 0.9 ms. Left in
+  the cat's 21.6 ms, by size: vertices and faces, triangle setup and walk, the pixel loops.
 
 Geometry is small beside that, and float suits it. A second standalone loop — rotate, translate and
 project a vertex; set up a triangle's area and three attribute gradients — in cycles:
@@ -138,8 +156,8 @@ separates them, at ~8 seconds a frame in float, and it is not a target (see Sett
     moves edges. The double-mantissa rounding the span ends use would do the same without a flag.
 - **Order of work.** Done: the arena for Tier 1, the per-pixel divides (`0945961`), 16-bit depth
   (`6da6808`), the scanline rasteriser (`035fd37`), the models' storage (`fb92a44`) and the per-face
-  and per-triangle waste (`5269d9e`). Next the affine path for small triangles, which is where the
-  demo's frame goes. What is left of the span matters for large surfaces: a full-screen textured wall
+  and per-triangle waste (`5269d9e`) and the affine path for small triangles (`62981cb`). Next the
+  vertices and faces, which are now the biggest part of the demo's frame. What is left of the span matters for large surfaces: a full-screen textured wall
   is 33 ms on the Pentium, where the table's loop would be ~26 ms. Fixed point across the engine is no
   longer on the list (see Settled decisions).
 

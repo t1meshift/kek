@@ -160,9 +160,16 @@ too. With the camera moved up so that the cat fills most of the frame, the paced
   current pixels. The emulated Pentium prices a dependent `fdiv` at ~4 cycles instead of 39, so this
   was measured on the 486DX2-66, where the divide is honest: a 32-pixel span's setup is ~860 cycles
   there, 26 of the quad's 89 ms, and the divide is 73 of them. Hiding it would save 2–3% at most,
-  which is not worth assembler; the other ~550 cycles are not accounted for, cache misses on the
-  span's code being one candidate. On that machine the 300-triangle room is 151 ms (6.6 fps), 55 of
-  them span setups and 46 the pixel loop. What does work is fewer spans: `KEK_3D_SPAN`, the pixels between divides, 32 by
+  which is not worth assembler. Taking the setup apart there, the quad's 26 ms: the three float adds
+  that move a span's 1/z, u/z and v/z along ~280 cycles, `kek_3d_perspective` ~200, the two
+  conversions ~185, the two steps ~30, the sum ~700 of 860: it is float work end to end, and the
+  parts overlap rather than add. The pixel loop is 61 cycles a pixel there, ~35 instructions a
+  pixel with about ten of them stack spills, since x86-32 has six registers for the loop's dozen
+  values. Unrolling it by four, the shading row for each pixel picked once, took 3.5% off a long
+  span and put 3.4% on the cat's short ones: not taken. Compiler flags, on the 486: `-fomit-frame-pointer`
+  2%, `-funroll-loops` 5% on the quad and 3% on the room, `-O3` nothing on those and 9% on the cat.
+  On that machine the 300-triangle room is 151 ms (6.6 fps), 55 of them span setups and 46 the pixel
+  loop. What does work is fewer spans: `KEK_3D_SPAN`, the pixels between divides, 32 by
   default (16 was Quake's), which makes the quad 15% faster than 16, the 300-triangle room 9%; 64
   makes them 22% and 13%. The pictures differ at 32 by 4,600 pixels of the quad and 700 of the
   room, at 64 by 13,800 and 2,800, and at 64 the lines of a near wall wobble. The cat, whose

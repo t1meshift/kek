@@ -366,6 +366,27 @@ on the hash has the reasoning, the measurements and what was verified.
 
 ### Found on the way, not from a backlog item
 
+Current working tree: camera orientation now uses the transpose of the world rotation,
+shared by point projection and model drawing. Projection checks its float coordinates before
+integer conversion; triangles beyond the ±2^20-pixel guard band take a bounded near/side
+clipping path with double intersections and interpolated UVs. Direct rasterizer calls reject
+coordinates outside that band. Public signatures and resource formats are unchanged.
+
+Verified locally: 218 tests in 14 suites with GCC and Clang under ASan/UBSan (including
+float-cast-overflow), clang-tidy, and DJGPP cross-builds of the library, tests, benchmark and
+DOS demo. A separate Linux sanitizer job is now in native CI. This is a build check for DOS;
+no new emulator or hardware timing is claimed. The external DOS measurement setup stays outside
+this repository.
+
+Native performance against `a62c07a`: GCC 16.2.1, Release (`-O3`), x86-64, CPU 2;
+three alternating before/after runs, 3,000 frames per scene, best of five rounds,
+with `--assets demo/assets`. The benchmark's temporary output copy printed six decimal
+places instead of three; its workloads were unchanged. All 11 frame checksums matched
+in every run. The largest median slowdown was 1.9%; the cat behind the camera improved
+by 31.9% and the distant cat by 4.6%. Pixel loops are unchanged: public boundary checks
+wrap the internal rasterizers, native GCC/Clang align the hot functions to 64 bytes
+(DJGPP retains its default alignment), and vertex transforms stay inside their loop.
+
 | | Was | Commit |
 | --- | --- | --- |
 | Null scene dereference | `_kek_apply_scene_switch` reached `e->scene->exit` unguarded, so a `kek_request_scene()` before the first `kek_set_scene()` was a segfault on the next `kek_update()` | `a8e6020` |

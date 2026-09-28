@@ -17,6 +17,8 @@ typedef struct KEK_model KEK_model;
 
 typedef struct KEK_camera {
     KEK_FVec3 position;
+    /* World orientation, radians, same Z-then-Y-then-X convention as models.
+       The view applies its inverse (the transpose), then projects. */
     KEK_FVec3 rotation;
     float fov;
     float near_plane;
@@ -54,7 +56,13 @@ char kek_3d_is_in_front(KEK_FVec3 p, KEK_camera camera);
 char kek_3d_is_in_depth_range(KEK_FVec3 p, KEK_camera* camera);
 KEK_FVec2 kek_3d_project(KEK_FVec3 p);
 KEK_FVec2 kek_3d_project_camera(KEK_FVec3 p, KEK_camera* camera, float aspect_ratio);
+/* Returns 0 without modifying out_vertex for an invalid camera, a point
+   outside the depth range, or a non-finite/out-of-range projection.
+   The safe screen range is [-1048576, 1048576] on each axis. */
 char kek_3d_project_vertex(KEK_engine* engine, KEK_camera* camera, KEK_FVec3 p, KEK_3D_ProjectedVertex *out_vertex);
+/* Direct triangle calls (including textured and border) reject screen
+   coordinates outside [-1048576, 1048576] before integer edge arithmetic.
+   Model drawing instead clips extreme projections to preserve visible faces. */
 void kek_3d_triangle(KEK_engine* engine, KEK_3D_ProjectedVertex vertices[3], uint8_t color_fill);
 void kek_3d_triangle_textured(KEK_engine* engine, KEK_3D_ProjectedVertex vertices[3], const KEK_texture* texture);
 void kek_3d_triangle_border(KEK_engine* engine, KEK_3D_ProjectedVertex vertices[3], uint8_t color_fill, uint8_t color_border);
@@ -66,6 +74,9 @@ void kek_3d_blit_vertex(KEK_engine* engine, KEK_3D_ProjectedVertex vertex, uint8
    end, and is off unless end > start. */
 void kek_3d_set_light(KEK_engine* engine, KEK_FVec3 direction, float ambient);
 void kek_3d_set_fog(KEK_engine* engine, float start, float end);
+/* Camera parameters must be finite, 0 < fov < 180, 0 < near < far.
+   Invalid cameras/transforms and non-finite transformed vertices draw nothing.
+   As before, far-plane rejection drops only faces wholly beyond far. */
 void kek_3d_draw_model(KEK_engine* e, KEK_model* model, KEK_camera* camera, KEK_FVec3 pos, KEK_FVec3 rotation);
 
 #ifdef __cplusplus

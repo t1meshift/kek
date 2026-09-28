@@ -32,7 +32,7 @@ Targets: `kek` (engine), `kek_demo` (the demo scene), `kek_editor` (editor), and
 
 `-Wall -Wextra -Wpedantic` (`/W4` on MSVC) are on for everything but the vendored Dear ImGui. `-DKEK_WERROR=ON` turns them into errors; `.github/workflows/native.yml` builds that way on Linux GCC, Linux Clang and Windows MSVC, and runs `clang-tidy` as a separate job, pinned to one LLVM release, where any finding fails the build.
 
-The engine's unit tests live in `tests/`, on [Unity](https://github.com/ThrowTheSwitch/Unity) (fetched like the other dependencies) and CTest. They build by default everywhere but the browser; `-DKEK_BUILD_TESTS=OFF` skips them.
+The engine's unit tests live in `tests/`, on [Unity](https://github.com/ThrowTheSwitch/Unity) (fetched like the other dependencies) and CTest. They build by default everywhere but the browser; `-DKEK_BUILD_TESTS=OFF` skips them. A separate Linux CI job runs the core tests with AddressSanitizer, UndefinedBehaviorSanitizer and float-to-integer overflow checks, stopping on the first diagnostic.
 
 ```sh
 ctest --test-dir build --output-on-failure

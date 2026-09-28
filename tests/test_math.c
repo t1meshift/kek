@@ -182,8 +182,22 @@ void test_signed_area_is_exact_for_odd_doubled_areas(void) {
     TEST_ASSERT_EQUAL_FLOAT(0.5f, fabsf(kek_area_triangle_signed(t)));
 }
 
+void test_camera_inverts_world_orientation_and_translation(void) {
+    size_t a, p;
+    KEK_camera camera = KEK_DEFAULT_CAMERA;
+    camera.position = (KEK_FVec3){4.f, -2.f, 7.f};
+    for (a = 0; a < ANGLE_COUNT; ++a) {
+        camera.rotation = ANGLES[a];
+        for (p = 0; p < POINT_COUNT; ++p) {
+            KEK_FVec3 world = kek_3d_translate(kek_3d_rotate(POINTS[p], ANGLES[a]), camera.position);
+            assert_vec3_within(1e-4f, POINTS[p], kek_3d_world_to_view(world, &camera));
+        }
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_camera_inverts_world_orientation_and_translation);
     RUN_TEST(test_mat3_from_zero_euler_is_the_identity);
     RUN_TEST(test_mat3_from_euler_agrees_with_kek_3d_rotate);
     RUN_TEST(test_mat3_from_euler_is_a_rotation);

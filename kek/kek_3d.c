@@ -1,4 +1,5 @@
 #include <math.h>
+#include <float.h>
 #include <stddef.h>
 #include <stdint.h>
 #include "kek.h"
@@ -139,6 +140,57 @@ KEK_FVec3 kek_3d_translate(KEK_FVec3 p, KEK_FVec3 delta) {
     };
 }
 
+/* Guard band for integer edge setup, including twice an edge's height. */
+#define KEK_3D_SCREEN_LIMIT_ 1048576
+
+static int kek_3d_finite_(KEK_FVec3 v) {
+    return fabsf(v.x) <= FLT_MAX && fabsf(v.y) <= FLT_MAX && fabsf(v.z) <= FLT_MAX;
+}
+
+static int kek_3d_camera_valid_(const KEK_camera* c) {
+    return kek_3d_finite_(c->position) && kek_3d_finite_(c->rotation)
+        && c->fov > 0.f && c->fov < 180.f && c->near_plane > 0.f
+        && c->far_plane <= FLT_MAX && c->far_plane > c->near_plane;
+}
+
+static KEK_Mat3 kek_3d_view_rotation_(KEK_FVec3 rotation) {
+    KEK_Mat3 m = kek_mat3_from_euler(rotation);
+    float swap = m.m[1]; m.m[1] = m.m[3]; m.m[3] = swap;
+    swap = m.m[2]; m.m[2] = m.m[6]; m.m[6] = swap;
+    swap = m.m[5]; m.m[5] = m.m[7]; m.m[7] = swap;
+    return m;
+}
+
+/* How the camera maps view space to the frame. */
+typedef struct KEK_3D_Lens_ {
+    float focal_length, aspect_ratio, half_w, half_h;
+} KEK_3D_Lens_;
+
+static KEK_3D_Lens_ kek_3d_lens_(const KEK_engine* e, const KEK_camera* c) {
+    return (KEK_3D_Lens_){ 1.f / tanf(c->fov * KEK_PI / 360.f),
+        (float)e->w / (float)e->h, (float)e->w * 0.5f, (float)e->h * 0.5f };
+}
+
+static inline KEK_FVec3 kek_3d_project_float_(const KEK_3D_Lens_* lens, KEK_FVec3 v) {
+    float inv_z = 1.f / v.z;
+    return (KEK_FVec3){
+        (v.x * lens->focal_length * inv_z / lens->aspect_ratio + 1.f) * lens->half_w,
+        (1.f - v.y * lens->focal_length * inv_z) * lens->half_h, inv_z};
+}
+
+static inline int kek_3d_project_screen_(KEK_FVec3 p, KEK_IVec2* screen, float* depth) {
+    if (!(fabsf(p.x) <= KEK_3D_SCREEN_LIMIT_ && fabsf(p.y) <= KEK_3D_SCREEN_LIMIT_
+          && p.z <= FLT_MAX)) return 0;
+    screen->x = (int)p.x;
+    screen->y = (int)p.y;
+    *depth = p.z;
+    return 1;
+}
+
+static int kek_3d_project_(const KEK_3D_Lens_* lens, KEK_FVec3 v, KEK_IVec2* screen, float* depth) {
+    return kek_3d_project_screen_(kek_3d_project_float_(lens, v), screen, depth);
+}
+
 KEK_FVec3 kek_3d_world_to_view(KEK_FVec3 p, KEK_camera* camera) {
     KEK_FVec3 translated = {
         .x = p.x - camera->position.x,
@@ -146,11 +198,7 @@ KEK_FVec3 kek_3d_world_to_view(KEK_FVec3 p, KEK_camera* camera) {
         .z = p.z - camera->position.z
     };
 
-    return kek_3d_rotate(translated, (KEK_FVec3) {
-        .x = -camera->rotation.x,
-        .y = -camera->rotation.y,
-        .z = -camera->rotation.z
-    });
+    return kek_mat3_apply(kek_3d_view_rotation_(camera->rotation), translated);
 }
 
 char kek_3d_is_in_front(KEK_FVec3 p, KEK_camera camera) {
@@ -175,19 +223,20 @@ KEK_FVec2 kek_3d_project_camera(KEK_FVec3 p, KEK_camera* camera, float aspect_ra
 }
 
 char kek_3d_project_vertex(KEK_engine* engine, KEK_camera* camera, KEK_FVec3 p, KEK_3D_ProjectedVertex *out_vertex) {
-    KEK_FVec3 view = kek_3d_world_to_view(p, camera);
-    float aspect_ratio = (float)engine->w / (float)engine->h;
-
-    if (!kek_3d_is_in_depth_range(view, camera)) {
-        return 0;
-    }
-
-    out_vertex->screen = kek_2d_to_screen(engine, kek_3d_project_camera(view, camera, aspect_ratio));
-    out_vertex->depth = view.z;
-    out_vertex->inv_z = 1.f / view.z;
-    out_vertex->u_over_z = 0.f;
-    out_vertex->v_over_z = 0.f;
-    out_vertex->shade = 0.f;
+    KEK_3D_ProjectedVertex result;
+    KEK_3D_Lens_ lens;
+    KEK_FVec3 view;
+    if (!kek_3d_camera_valid_(camera) || !kek_3d_finite_(p)) return 0;
+    view = kek_3d_world_to_view(p, camera);
+    lens = kek_3d_lens_(engine, camera);
+    if (!(lens.focal_length > 0.f && lens.focal_length <= FLT_MAX)) return 0;
+    if (!kek_3d_finite_(view) || !kek_3d_is_in_depth_range(view, camera)
+        || !kek_3d_project_(&lens, view, &result.screen, &result.inv_z)) return 0;
+    result.depth = view.z;
+    result.u_over_z = 0.f;
+    result.v_over_z = 0.f;
+    result.shade = 0.f;
+    *out_vertex = result;
     return 1;
 }
 
@@ -306,6 +355,15 @@ typedef struct KEK_3D_Setup_ {
     /* The one divide a triangle costs; every gradient is a multiply by it. */
     float inv_area;
 } KEK_3D_Setup_;
+
+static int kek_3d_screen_bounded_(const KEK_3D_ProjectedVertex vertices[3]) {
+    int i;
+    for (i = 0; i < 3; ++i) {
+        if (vertices[i].screen.x < -KEK_3D_SCREEN_LIMIT_ || vertices[i].screen.x > KEK_3D_SCREEN_LIMIT_
+            || vertices[i].screen.y < -KEK_3D_SCREEN_LIMIT_ || vertices[i].screen.y > KEK_3D_SCREEN_LIMIT_) return 0;
+    }
+    return 1;
+}
 
 static int kek_3d_setup(const KEK_3D_ProjectedVertex vertices[3], KEK_3D_Setup_* s) {
     KEK_IVec2 v0 = vertices[0].screen, v1 = vertices[1].screen, v2 = vertices[2].screen;
@@ -597,7 +655,17 @@ static void kek_3d_flat_span(KEK_engine* engine, const void* context, int y, int
     }
 }
 
-void kek_3d_triangle(KEK_engine* engine, KEK_3D_ProjectedVertex vertices[3], uint8_t color_fill) {
+/* Keep these large hot functions on a cache-line boundary: adding camera
+   validation must not shift their unchanged loops across instruction lines.
+   DJGPP's COFF format permits at most 16-byte alignment; it and other C99
+   compilers retain their default function alignment. */
+#if defined(__GNUC__) && !defined(__DJGPP__)
+#define KEK_3D_RASTER_ALIGN_ __attribute__((aligned(64)))
+#else
+#define KEK_3D_RASTER_ALIGN_
+#endif
+
+static KEK_3D_RASTER_ALIGN_ void kek_3d_triangle_bounded_(KEK_engine* engine, KEK_3D_ProjectedVertex vertices[3], uint8_t color_fill) {
     KEK_3D_Flat_ f;
 
     if (!kek_3d_setup(vertices, &f.c.setup)) {
@@ -882,7 +950,7 @@ static void kek_3d_textured_span(KEK_engine* engine, const void* context, int y,
     }
 }
 
-void kek_3d_triangle_textured(KEK_engine* engine, KEK_3D_ProjectedVertex vertices[3], const KEK_texture* texture) {
+static KEK_3D_RASTER_ALIGN_ void kek_3d_triangle_textured_bounded_(KEK_engine* engine, KEK_3D_ProjectedVertex vertices[3], const KEK_texture* texture) {
     KEK_3D_Textured_ t;
     int log2_w = kek_3d_log2(texture->width);
     int log2_h = kek_3d_log2(texture->height);
@@ -910,10 +978,22 @@ void kek_3d_triangle_textured(KEK_engine* engine, KEK_3D_ProjectedVertex vertice
     kek_3d_walk(engine, &t.c.setup, kek_3d_textured_span, &t);
 }
 
+/* Public entry points validate integer coordinates once. Internal model
+   drawing has already checked its projections, so it uses the bounded paths
+   directly and leaves the rasteriser's setup and pixel loops unchanged. */
+void kek_3d_triangle(KEK_engine* engine, KEK_3D_ProjectedVertex vertices[3], uint8_t color) {
+    if (kek_3d_screen_bounded_(vertices)) kek_3d_triangle_bounded_(engine, vertices, color);
+}
+
+void kek_3d_triangle_textured(KEK_engine* engine, KEK_3D_ProjectedVertex vertices[3], const KEK_texture* texture) {
+    if (kek_3d_screen_bounded_(vertices)) kek_3d_triangle_textured_bounded_(engine, vertices, texture);
+}
+
 void kek_3d_triangle_border(KEK_engine* engine, KEK_3D_ProjectedVertex vertices[3], uint8_t color_fill, uint8_t color_border) {
     KEK_IVec2 screen_vertices[3];
+    if (!kek_3d_screen_bounded_(vertices)) return;
 
-    kek_3d_triangle(engine, vertices, color_fill);
+    kek_3d_triangle_bounded_(engine, vertices, color_fill);
     for (int i = 0; i < 3; ++i) {
         screen_vertices[i] = vertices[i].screen;
     }
@@ -957,12 +1037,12 @@ static int kek_3d_clip_near(
             out_uv[n++] = ua;
         }
         if (a_in != b_in && n < KEK_3D_CLIP_NEAR_MAX_VERTS) {
-            float t = (near - a.z) / (b.z - a.z);
-            out_v[n].x  = a.x  + t * (b.x  - a.x);
-            out_v[n].y  = a.y  + t * (b.y  - a.y);
+            double t = ((double)near - a.z) / ((double)b.z - a.z);
+            out_v[n].x  = (float)((double)a.x + t * ((double)b.x - a.x));
+            out_v[n].y  = (float)((double)a.y + t * ((double)b.y - a.y));
             out_v[n].z  = near;
-            out_uv[n].x = ua.x + t * (ub.x - ua.x);
-            out_uv[n].y = ua.y + t * (ub.y - ua.y);
+            out_uv[n].x = (float)((double)ua.x + t * ((double)ub.x - ua.x));
+            out_uv[n].y = (float)((double)ua.y + t * ((double)ub.y - ua.y));
             ++n;
         }
     }
@@ -982,15 +1062,29 @@ void kek_3d_set_fog(KEK_engine* engine, float start, float end) {
 /* cross(b - a, c - a), in view space: it points out of the face, the way the
    winding the backface cull keeps faces. A model stores no normals, since
    this is all flat shading needs of one. */
+/* Scale before narrowing so both the normal and its squared length fit.
+   Only used when float cross products or their squared length overflow. */
+static KEK_FVec3 kek_3d_face_normal_wide_(const KEK_FVec3 v[3]) {
+    double bx = (double)v[1].x - v[0].x, by = (double)v[1].y - v[0].y, bz = (double)v[1].z - v[0].z;
+    double cx = (double)v[2].x - v[0].x, cy = (double)v[2].y - v[0].y, cz = (double)v[2].z - v[0].z;
+    double nx = by * cz - bz * cy, ny = bz * cx - bx * cz, nz = bx * cy - by * cx;
+    double scale = fabs(nx);
+    if (fabs(ny) > scale) scale = fabs(ny);
+    if (fabs(nz) > scale) scale = fabs(nz);
+    if (scale == 0.) return (KEK_FVec3){0.f, 0.f, 0.f};
+    return (KEK_FVec3){(float)(nx / scale), (float)(ny / scale), (float)(nz / scale)};
+}
+
 static KEK_FVec3 kek_3d_face_normal(const KEK_FVec3 v[3]) {
     float abx = v[1].x - v[0].x, aby = v[1].y - v[0].y, abz = v[1].z - v[0].z;
     float acx = v[2].x - v[0].x, acy = v[2].y - v[0].y, acz = v[2].z - v[0].z;
 
-    return (KEK_FVec3){
-        aby * acz - abz * acy,
-        abz * acx - abx * acz,
-        abx * acy - aby * acx
-    };
+    KEK_FVec3 normal = {aby * acz - abz * acy, abz * acx - abx * acz, abx * acy - aby * acx};
+    if (!(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z <= FLT_MAX)) {
+        return kek_3d_face_normal_wide_(v);
+    }
+
+    return normal;
 }
 
 /* The face's own shade in levels, from its normal. Both vectors are in view
@@ -1030,20 +1124,6 @@ static float kek_3d_fog(const KEK_light* light, float z) {
     return 0.f;
 }
 
-/* How the camera maps view space to the frame. */
-typedef struct KEK_3D_Lens_ {
-    float focal_length, aspect_ratio, half_w, half_h;
-} KEK_3D_Lens_;
-
-/* A point in front of the near plane onto the frame. */
-static void kek_3d_project_(const KEK_3D_Lens_* lens, KEK_FVec3 v, KEK_IVec2* out_screen, float* out_inv_z) {
-    float inv_z = 1.f / v.z;
-
-    out_screen->x = (int)((v.x * lens->focal_length * inv_z / lens->aspect_ratio + 1.f) * lens->half_w);
-    out_screen->y = (int)((1.f - v.y * lens->focal_length * inv_z) * lens->half_h);
-    *out_inv_z = inv_z;
-}
-
 /* A vertex in front of the near plane, projected once for every face that
    shares it rather than once per face. */
 typedef struct KEK_3D_Projected_ {
@@ -1052,28 +1132,98 @@ typedef struct KEK_3D_Projected_ {
     float fog;
 } KEK_3D_Projected_;
 
-/* One triangle of a face on to the rasteriser: culled if it is wholly off one
-   side of the frame, or back-facing or thinner than a pixel on screen. */
-static void kek_3d_draw_triangle_(KEK_engine* e, KEK_3D_ProjectedVertex pv[3], const KEK_texture* texture,
-                                  uint8_t color) {
-    KEK_IVec2 sv[3];
-
-    sv[0] = pv[0].screen;
-    sv[1] = pv[1].screen;
-    sv[2] = pv[2].screen;
-    if ((sv[0].x < 0 && sv[1].x < 0 && sv[2].x < 0) ||
+static int kek_3d_screen_visible_(const KEK_engine* e, KEK_IVec2 sv[3]) {
+    return !((sv[0].x < 0 && sv[1].x < 0 && sv[2].x < 0) ||
         (sv[0].x >= e->w && sv[1].x >= e->w && sv[2].x >= e->w) ||
         (sv[0].y < 0 && sv[1].y < 0 && sv[2].y < 0) ||
-        (sv[0].y >= e->h && sv[1].y >= e->h && sv[2].y >= e->h)) {
-        return;
-    }
-    if (kek_area_triangle_signed(sv) < 1) {
-        return;
-    }
+        (sv[0].y >= e->h && sv[1].y >= e->h && sv[2].y >= e->h))
+        && kek_area_triangle_signed(sv) >= 1.f;
+}
+
+/* Clipped triangles still need the screen-space winding/coverage check. */
+static void kek_3d_draw_triangle_(KEK_engine* e, KEK_3D_ProjectedVertex pv[3], const KEK_texture* texture,
+                                  uint8_t color) {
+    KEK_IVec2 sv[3] = {pv[0].screen, pv[1].screen, pv[2].screen};
+    if (!kek_3d_screen_visible_(e, sv)) return;
     if (texture) {
-        kek_3d_triangle_textured(e, pv, texture);
+        kek_3d_triangle_textured_bounded_(e, pv, texture);
     } else {
-        kek_3d_triangle(e, pv, color);
+        kek_3d_triangle_bounded_(e, pv, color);
+    }
+}
+
+/* Rare path: a triangle clipped by five planes has at most eight corners.
+   Keep intersections in double until projection, including UVs: narrowing
+   between planes loses the visible sliver of a very large triangle. */
+typedef struct KEK_3D_ClipVertex_ { double x, y, z, u, v; } KEK_3D_ClipVertex_;
+
+static double kek_3d_clip_distance_(KEK_3D_ClipVertex_ v, int plane,
+                                   const KEK_3D_Lens_* lens, float near) {
+    switch (plane) {
+        case 0: return v.z - near;
+        case 1: return v.z * lens->aspect_ratio + v.x * lens->focal_length;
+        case 2: return v.z * lens->aspect_ratio - v.x * lens->focal_length;
+        case 3: return v.z + v.y * lens->focal_length;
+        default: return v.z - v.y * lens->focal_length;
+    }
+}
+
+static void kek_3d_clip_sides_(KEK_engine* e, const KEK_3D_Lens_* lens, float near,
+                               const KEK_FVec3 v[3], const KEK_FVec2 uv[3],
+                               float shade, const KEK_texture* texture, uint8_t color) {
+    KEK_3D_ClipVertex_ buffers[2][8];
+    KEK_3D_ClipVertex_* in = buffers[0];
+    KEK_3D_ClipVertex_* out = buffers[1];
+    KEK_3D_ProjectedVertex projected[8];
+    int count = 3, plane, i;
+    for (i = 0; i < 3; ++i) {
+        in[i] = (KEK_3D_ClipVertex_){v[i].x, v[i].y, v[i].z, uv[i].x, uv[i].y};
+    }
+    for (plane = 0; plane < 5 && count >= 3; ++plane) {
+        int n = 0;
+        KEK_3D_ClipVertex_* swap;
+        for (i = 0; i < count; ++i) {
+            KEK_3D_ClipVertex_ a = in[i], b = in[(i + 1) % count];
+            double da = kek_3d_clip_distance_(a, plane, lens, near);
+            double db = kek_3d_clip_distance_(b, plane, lens, near);
+            if (da >= 0.) {
+                if (n == 8) return;
+                out[n++] = a;
+            }
+            if ((da < 0. && db > 0.) || (da > 0. && db < 0.)) {
+                double t = da / (da - db);
+                KEK_3D_ClipVertex_ c = {a.x + t * (b.x - a.x), a.y + t * (b.y - a.y),
+                    a.z + t * (b.z - a.z), a.u + t * (b.u - a.u), a.v + t * (b.v - a.v)};
+                /* Snap the intersected component to the plane. */
+                switch (plane) {
+                    case 0: c.z = near; break;
+                    case 1: c.x = -c.z * lens->aspect_ratio / lens->focal_length; break;
+                    case 2: c.x = c.z * lens->aspect_ratio / lens->focal_length; break;
+                    case 3: c.y = -c.z / lens->focal_length; break;
+                    default: c.y = c.z / lens->focal_length; break;
+                }
+                if (n == 8) return;
+                out[n++] = c;
+            }
+        }
+        count = n;
+        swap = in; in = out; out = swap;
+    }
+    for (i = 0; i < count; ++i) {
+        double inv_z = 1. / in[i].z;
+        double x = (in[i].x * lens->focal_length * inv_z / lens->aspect_ratio + 1.) * lens->half_w;
+        double y = (1. - in[i].y * lens->focal_length * inv_z) * lens->half_h;
+        if (!(x >= -KEK_3D_SCREEN_LIMIT_ && x <= KEK_3D_SCREEN_LIMIT_
+              && y >= -KEK_3D_SCREEN_LIMIT_ && y <= KEK_3D_SCREEN_LIMIT_) || !(inv_z > 0. && inv_z <= FLT_MAX)) return;
+        projected[i] = (KEK_3D_ProjectedVertex){
+            {(int)x, (int)y}, (float)in[i].z, (float)inv_z,
+            texture ? (float)(in[i].u * inv_z) : 0.f,
+            texture ? (float)(in[i].v * inv_z) : 0.f,
+            shade + kek_3d_fog(&e->light, (float)in[i].z)};
+    }
+    for (i = 1; i + 1 < count; ++i) {
+        KEK_3D_ProjectedVertex triangle[3] = {projected[0], projected[i], projected[i + 1]};
+        kek_3d_draw_triangle_(e, triangle, texture, color);
     }
 }
 
@@ -1096,6 +1246,9 @@ void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FV
     uint32_t i;
     int row;
 
+    if (!kek_3d_camera_valid_(camera) || !kek_3d_finite_(pos) || !kek_3d_finite_(rotation)
+        || !kek_3d_finite_(mdl->scale) || !kek_3d_finite_(mdl->offset)) return;
+
     /* A model the arena has no room to transform is not drawn. */
     view_verts = (KEK_FVec3*)kek_arena_temp(&e->arena, (size_t)mdl->verts_count * sizeof(KEK_FVec3));
     projected = (KEK_3D_Projected_*)kek_arena_temp(&e->arena, (size_t)mdl->verts_count * sizeof(KEK_3D_Projected_));
@@ -1105,15 +1258,13 @@ void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FV
     }
 
     model_rot    = kek_mat3_from_euler(rotation);
-    camera_rot   = kek_mat3_from_euler((KEK_FVec3){
-                       -camera->rotation.x,
-                       -camera->rotation.y,
-                       -camera->rotation.z });
+    camera_rot = kek_3d_view_rotation_(camera->rotation);
     light_view   = kek_mat3_apply(camera_rot, e->light.direction);
-    lens.aspect_ratio = (float)e->w / (float)e->h;
-    lens.focal_length = 1.f / tanf(camera->fov * KEK_PI / 360.f);
-    lens.half_w       = (float)e->w * 0.5f;
-    lens.half_h       = (float)e->h * 0.5f;
+    lens = kek_3d_lens_(e, camera);
+    if (!(lens.focal_length > 0.f && lens.focal_length <= FLT_MAX)) {
+        kek_arena_temp_release(&e->arena, mark);
+        return;
+    }
 
     /* A stored vertex q is at offset + scale * q in the model, so in view
        space it is camera_rot * (model_rot * (offset + scale * q) + pos -
@@ -1134,11 +1285,23 @@ void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FV
 
     for (i = 0; i < mdl->verts_count; ++i) {
         KEK_model_vertex q = mdl->verts[i];
-        KEK_FVec3 v = kek_3d_translate(
-            kek_mat3_apply(to_view, (KEK_FVec3){ (float)q.x, (float)q.y, (float)q.z }), origin);
+        float x = (float)q.x, y = (float)q.y, z = (float)q.z;
+        /* Keep the fixed matrix in this loop instead of passing its nine
+           floats by value through an external call for every vertex. */
+        KEK_FVec3 v = {
+            to_view.m[0] * x + to_view.m[1] * y + to_view.m[2] * z + origin.x,
+            to_view.m[3] * x + to_view.m[4] * y + to_view.m[5] * z + origin.y,
+            to_view.m[6] * x + to_view.m[7] * y + to_view.m[8] * z + origin.z
+        };
+        if (!kek_3d_finite_(v)) {
+            kek_arena_temp_release(&e->arena, mark);
+            return;
+        }
         view_verts[i] = v;
+        projected[i].inv_z = 0.f;
         if (v.z > near) {
-            kek_3d_project_(&lens, v, &projected[i].screen, &projected[i].inv_z);
+            KEK_FVec3 p = kek_3d_project_float_(&lens, v);
+            kek_3d_project_screen_(p, &projected[i].screen, &projected[i].inv_z);
             projected[i].fog = kek_3d_fog(&e->light, v.z);
         }
     }
@@ -1153,10 +1316,10 @@ void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FV
         KEK_FVec3 cv[KEK_3D_CLIP_NEAR_MAX_VERTS];
         KEK_FVec2 cuv[KEK_3D_CLIP_NEAR_MAX_VERTS];
         KEK_FVec3 normal;
-        KEK_3D_ProjectedVertex pv[3];
+        KEK_3D_ProjectedVertex pv[3], clipped[KEK_3D_CLIP_NEAR_MAX_VERTS];
         const KEK_texture* face_texture;
         float face_shade;
-        int cn, tri_count, t, k;
+        int cn, tri_count, t, k, projected_face;
 
         /* KEK_MODEL_UV_NONE is past every uvs_count, so a corner without a
            UV fails the same test as one out of range. */
@@ -1171,6 +1334,8 @@ void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FV
         fv[1] = view_verts[face.b];
         fv[2] = view_verts[face.c];
 
+        if (fv[0].z <= near && fv[1].z <= near && fv[2].z <= near) continue;
+
         /* Far-plane cull: skip entirely if all vertices are beyond far plane */
         if (fv[0].z >= camera->far_plane &&
             fv[1].z >= camera->far_plane &&
@@ -1178,12 +1343,20 @@ void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FV
             continue;
         }
 
-        /* The eye, at the origin, behind the face's plane: a back face, which
-           the camera cannot see whatever the clip and the projection make of
-           it, so it is dropped before it costs a square root. The screen-space
-           test after projection stays, for faces thinner than a pixel. */
+        projected_face = projected[face.a].inv_z > 0.f && projected[face.b].inv_z > 0.f
+            && projected[face.c].inv_z > 0.f;
+        if (projected_face) {
+            KEK_IVec2 screen[3] = {projected[face.a].screen, projected[face.b].screen, projected[face.c].screen};
+            if (!kek_3d_screen_visible_(e, screen)) continue;
+        }
+
+        /* Keep the view-space cull too: integer projection can give a thin
+           back face a different winding. Double keeps the dot finite for
+           faces awaiting clipping; ordinary faces retain float arithmetic. */
         normal = kek_3d_face_normal(fv);
-        if (normal.x * fv[0].x + normal.y * fv[0].y + normal.z * fv[0].z >= 0.f) {
+        if (projected_face
+            ? normal.x * fv[0].x + normal.y * fv[0].y + normal.z * fv[0].z >= 0.f
+            : (double)normal.x * fv[0].x + (double)normal.y * fv[0].y + (double)normal.z * fv[0].z >= 0.) {
             continue;
         }
         face_shade = kek_3d_face_shade(normal, light_view, e->light.ambient);
@@ -1197,7 +1370,7 @@ void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FV
 
         /* Wholly in front of the near plane, which is most faces: the
            vertices were projected already. */
-        if (fv[0].z > near && fv[1].z > near && fv[2].z > near) {
+        if (projected_face) {
             const uint16_t corner[3] = { face.a, face.b, face.c };
             for (k = 0; k < 3; ++k) {
                 const KEK_3D_Projected_* p = &projected[corner[k]];
@@ -1208,7 +1381,18 @@ void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FV
                 pv[k].v_over_z = face_is_textured ? fuv[k].y * p->inv_z : 0.f;
                 pv[k].shade    = face_shade + p->fog;
             }
-            kek_3d_draw_triangle_(e, pv, face_texture, color);
+            if (face_texture) {
+                kek_3d_triangle_textured_bounded_(e, pv, face_texture);
+            } else {
+                kek_3d_triangle_bounded_(e, pv, color);
+            }
+            continue;
+        }
+
+        if ((fv[0].z > near && projected[face.a].inv_z == 0.f)
+            || (fv[1].z > near && projected[face.b].inv_z == 0.f)
+            || (fv[2].z > near && projected[face.c].inv_z == 0.f)) {
+            kek_3d_clip_sides_(e, &lens, near, fv, fuv, face_shade, face_texture, color);
             continue;
         }
 
@@ -1216,24 +1400,24 @@ void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FV
         cn = kek_3d_clip_near(fv, fuv, near, cv, cuv);
         if (cn < 3) continue;
 
+        for (k = 0; k < cn; ++k) {
+            if (!kek_3d_project_(&lens, cv[k], &clipped[k].screen, &clipped[k].inv_z)) break;
+            clipped[k].depth = cv[k].z;
+            clipped[k].u_over_z = face_is_textured ? cuv[k].x * clipped[k].inv_z : 0.f;
+            clipped[k].v_over_z = face_is_textured ? cuv[k].y * clipped[k].inv_z : 0.f;
+            clipped[k].shade = face_shade + kek_3d_fog(&e->light, cv[k].z);
+        }
+        if (k != cn) {
+            kek_3d_clip_sides_(e, &lens, near, fv, fuv, face_shade, face_texture, color);
+            continue;
+        }
+
         /* Rasterize as a triangle fan (1 tri for cn==3, 2 tris for cn==4) */
         tri_count = cn - 2;
         for (t = 0; t < tri_count; ++t) {
-            int idxs[3];
-
-            idxs[0] = 0; idxs[1] = t + 1; idxs[2] = t + 2;
-
-            /* Project each clipped vertex */
-            for (k = 0; k < 3; ++k) {
-                int vi = idxs[k];
-                float inv_z;
-                kek_3d_project_(&lens, cv[vi], &pv[k].screen, &inv_z);
-                pv[k].depth    = cv[vi].z;
-                pv[k].inv_z    = inv_z;
-                pv[k].u_over_z = face_is_textured ? cuv[vi].x * inv_z : 0.f;
-                pv[k].v_over_z = face_is_textured ? cuv[vi].y * inv_z : 0.f;
-                pv[k].shade    = face_shade + kek_3d_fog(&e->light, cv[vi].z);
-            }
+            pv[0] = clipped[0];
+            pv[1] = clipped[t + 1];
+            pv[2] = clipped[t + 2];
             kek_3d_draw_triangle_(e, pv, face_texture, color);
         }
     }

@@ -109,6 +109,25 @@ jobs:
           cmake -S demo -B build-demo ${{ matrix.generator }} -DCMAKE_BUILD_TYPE=Release -DKEK_WERROR=${{ matrix.werror }} -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install" -DSDL3_DIR="${{ github.workspace }}/build/_deps/sdl3-build"
           cmake --build build-demo --config Release --parallel
 
+  sanitizers:
+    name: Core sanitizers
+    runs-on: ubuntu-24.04
+    env:
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure core and tests
+        run: >
+          cmake -B build-sanitizers -DCMAKE_BUILD_TYPE=Debug
+          -DKEK_BUILD_DEMO=OFF -DKEK_BUILD_EDITOR=OFF -DKEK_BUILD_BENCH=OFF
+          -DKEK_BUILD_TESTS=ON -DKEK_WERROR=ON
+          -DCMAKE_C_FLAGS="-fsanitize=address,undefined,float-cast-overflow -fno-sanitize-recover=all -fno-omit-frame-pointer"
+      - name: Build
+        run: cmake --build build-sanitizers --parallel
+      - name: Test
+        run: ctest --test-dir build-sanitizers --output-on-failure --no-tests=error
+
   tidy:
     name: clang-tidy
     # Pinned, both the image and the clang-tidy below: a check that appears

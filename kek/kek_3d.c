@@ -950,11 +950,267 @@ static void kek_3d_textured_span(KEK_engine* engine, const void* context, int y,
     }
 }
 
+/* A triangle this many pixels wide or less is drawn affine: u and v are
+   planes over the screen like the depth, worked out once per triangle from its
+   vertices, and a row is a few integer multiplies rather than the
+   perspective divide at each end of every span. Up to KEK_3D_SPAN pixels a
+   row is one span already and only its ends come from the plane instead of
+   the divide; past that the texture is affine across the triangle where it
+   was perspective-correct every 16 pixels, the trade Quake made for its
+   models. The demo's cat, on the emulated Pentium, is 16% faster at 48 and
+   its frames differ from the perspective ones by a handful of pixels. Wider
+   triangles keep the perspective path. 0 turns it off. */
+#ifndef KEK_3D_AFFINE_WIDTH
+#define KEK_3D_AFFINE_WIDTH 48
+#endif
+#ifndef KEK_3D_AFFINE_FAST_ROW
+#define KEK_3D_AFFINE_FAST_ROW 1
+#endif
+
+typedef struct KEK_3D_Affine_ {
+    KEK_3D_Common_ c;
+    const KEK_texture* texture;
+    uint32_t u_mask, v_mask, width;
+    /* u in texels and v in texel rows, in 16.16, at vertex 0 and per pixel;
+       the loop steps v times the width, which is one multiply after the
+       clamp. Computed unsigned, modulo 2^32, and read as signed to clamp:
+       the caller keeps them inside +-2^15 rows, so the read is exact, and
+       32 bits is the whole cost where 64 is a libgcc call on the targets
+       this is for. The clamp is the perspective span's: half a texel short
+       of the far edge, or no bounds at all under REPEAT, where the loop's
+       adds wrap as the texture does. */
+    uint32_t u_origin, v_origin, u_dx, u_dy, v_dx, v_dy;
+    int32_t u_lo, u_hi, v_lo, v_hi;
+    /* Depth and shade as planes in the loop's fixed point too, when the
+       triangle's vertices are well inside what the buffer and the shade can
+       hold, so that nothing between them needs clamping: a row then starts
+       with a multiply per attribute, not kek_3d_row's float evaluation and
+       rounding. */
+    int fast_row;
+    uint32_t z_origin, z_dy, s_origin, s_dy;
+} KEK_3D_Affine_;
+
+static int kek_3d_affine_small_(const KEK_3D_ProjectedVertex v[3]) {
+    int lo = v[0].screen.x, hi = lo, i;
+
+    if (KEK_3D_AFFINE_WIDTH <= 0) {
+        return 0;
+    }
+    for (i = 0; i < 3; ++i) {
+        if (!(v[i].inv_z >= KEK_EPSILON)) {
+            return 0;
+        }
+        lo = KEK_MIN(lo, v[i].screen.x);
+        hi = KEK_MAX(hi, v[i].screen.x);
+    }
+    return hi - lo <= KEK_3D_AFFINE_WIDTH;
+}
+
+/* The step from one span end to the next, both modulo 2^32, as
+   kek_3d_texel_step gives it: the signed difference over the steps, rounded
+   toward the first end, with a multiply by a reciprocal in place of the
+   divide. */
+static int32_t kek_3d_clamp32(int32_t t, int32_t lo, int32_t hi) {
+    return t < lo ? lo : t > hi ? hi : t;
+}
+
+static uint32_t kek_3d_texel_step32(uint32_t from, uint32_t to, int steps) {
+    int32_t d = (int32_t)(to - from);
+    uint32_t size = d < 0 ? 0u - (uint32_t)d : (uint32_t)d;
+    uint32_t step;
+
+    if (steps <= 0) {
+        return 0;
+    }
+    step = steps == KEK_3D_SPAN ? size / KEK_3D_SPAN
+                                : (uint32_t)(((uint64_t)size * KEK_3D_RECIPROCAL[steps]) >> 32);
+    return d < 0 ? 0u - step : step;
+}
+
+static void kek_3d_affine_span(KEK_engine* engine, const void* context, int y, int first, int last) {
+    const KEK_3D_Affine_* a = (const KEK_3D_Affine_*)context;
+    const uint8_t* pixels = a->texture->data;
+    uint16_t* db = engine->db + (size_t)y * engine->w;
+    uint8_t* fb = engine->fb + (size_t)y * engine->w;
+    const uint8_t* rows[4];
+    KEK_3D_Row_ st;
+    uint32_t dy = (uint32_t)(y - a->c.setup.y0), x0 = (uint32_t)a->c.setup.x0;
+    uint32_t u_row = a->u_origin + a->u_dy * dy - a->u_dx * x0;
+    uint32_t v_row = a->v_origin + a->v_dy * dy - a->v_dx * x0;
+    int32_t u_next = kek_3d_clamp32((int32_t)(u_row + a->u_dx * (uint32_t)first), a->u_lo, a->u_hi);
+    int32_t v_next = kek_3d_clamp32((int32_t)(v_row + a->v_dx * (uint32_t)first), a->v_lo, a->v_hi);
+    int x = first;
+
+    if (a->fast_row) {
+        st.z = a->z_origin + a->z_dy * (uint32_t)y + (uint32_t)a->c.depth_dx * (uint32_t)first;
+        st.dz = (uint32_t)a->c.depth_dx;
+        st.s = 0;
+        st.ds = 0;
+        if (!a->c.shade_uniform) {
+            st.s = (int32_t)(a->s_origin + a->s_dy * (uint32_t)y + (uint32_t)a->c.shade_dx * (uint32_t)first);
+            st.ds = a->c.shade_dx;
+        }
+    } else {
+        kek_3d_row(&a->c, y, first, last, &st);
+    }
+    if (a->c.shade_uniform) {
+        kek_3d_dither_rows(&a->c, y, rows);
+    }
+    while (x <= last) {
+        int count = last - x + 1;
+        int steps = count > KEK_3D_SPAN ? KEK_3D_SPAN : count - 1;
+        int end;
+        int32_t u_first = u_next, v_first = v_next;
+        uint32_t tu_first = (uint32_t)u_first, tv_first = (uint32_t)v_first * a->width;
+        uint32_t du, dv;
+
+        if (count > KEK_3D_SPAN) {
+            count = KEK_3D_SPAN;
+        }
+        u_next = kek_3d_clamp32((int32_t)(u_row + a->u_dx * (uint32_t)(x + steps)), a->u_lo, a->u_hi);
+        v_next = kek_3d_clamp32((int32_t)(v_row + a->v_dx * (uint32_t)(x + steps)), a->v_lo, a->v_hi);
+        du = kek_3d_texel_step32((uint32_t)u_first, (uint32_t)u_next, steps);
+        dv = kek_3d_texel_step32((uint32_t)v_first, (uint32_t)v_next, steps) * a->width;
+        end = x + count;
+        if (a->c.shade_uniform) {
+            st.z = kek_3d_texels(db, fb, x, end, rows, pixels, a->u_mask, a->v_mask, st.z, st.dz,
+                                 tu_first, du, tv_first, dv);
+        } else {
+            st.z = kek_3d_texels_shaded(db, fb, x, end, engine->shading_palette, KEK_3D_BAYER4[y & 3], pixels,
+                                        a->u_mask, a->v_mask, st.z, st.dz, &st.s, st.ds,
+                                        tu_first, du, tv_first, dv);
+        }
+        x = end;
+    }
+}
+
+/* Whether the depth and shade planes may be stepped in fixed point from the
+   vertices: their values there unclamped, and far enough inside the ranges
+   that the pixels, which reach a pixel past the vertices, stay inside them
+   too. Fills a's fixed-point origins and y steps. */
+static int kek_3d_affine_fast_row_(const KEK_3D_ProjectedVertex v[3], KEK_3D_Affine_* a) {
+    const KEK_3D_Common_* c = &a->c;
+    double depth_dy = (double)c->inv_z.dy * (double)KEK_3D_DEPTH_SCALE * 32768.;
+    int32_t z[3];
+    int64_t margin, zmin, zmax;
+    int k, clamped;
+
+    if (!c->depth_dx_fits || !(depth_dy > -1073741824. && depth_dy < 1073741824.)) {
+        return 0;
+    }
+    zmin = zmax = 0;
+    for (k = 0; k < 3; ++k) {
+        z[k] = kek_3d_depth_fixed(v[k].inv_z, &clamped);
+        if (clamped) {
+            return 0;
+        }
+        zmin = k == 0 || z[k] < zmin ? z[k] : zmin;
+        zmax = k == 0 || z[k] > zmax ? z[k] : zmax;
+    }
+    a->z_dy = (uint32_t)(int32_t)kek_3d_round(depth_dy);
+    margin = 2 * (((int64_t)c->depth_dx < 0 ? -(int64_t)c->depth_dx : (int64_t)c->depth_dx)
+                  + ((int32_t)a->z_dy < 0 ? -(int64_t)(int32_t)a->z_dy : (int64_t)(int32_t)a->z_dy));
+    if (zmin - margin < KEK_3D_DEPTH_LEAST || zmax + margin > KEK_3D_DEPTH_MOST) {
+        return 0;
+    }
+    a->z_origin = (uint32_t)z[0] - (uint32_t)c->depth_dx * (uint32_t)c->setup.x0 - a->z_dy * (uint32_t)c->setup.y0;
+    if (!c->shade_uniform) {
+        double shade_dy = (double)c->shade.dy * (double)(KEK_3D_SHADE_ONE << KEK_3D_SHADE_FRACTION_BITS);
+
+        if (!c->shade_dx_fits || !(shade_dy > -536870912. && shade_dy < 536870912.)) {
+            return 0;
+        }
+        for (k = 0; k < 3; ++k) {
+            if (!(v[k].shade > -KEK_3D_SHADE_BOUND / 2.f && v[k].shade < KEK_3D_SHADE_BOUND / 2.f)) {
+                return 0;
+            }
+        }
+        a->s_dy = (uint32_t)(int32_t)kek_3d_round(shade_dy);
+        a->s_origin = (uint32_t)kek_3d_shade_span_fixed(v[0].shade) - (uint32_t)c->shade_dx * (uint32_t)c->setup.x0
+                      - a->s_dy * (uint32_t)c->setup.y0;
+    }
+    return 1;
+}
+
+/* The limits under which the 32-bit planes are exact: textures of up to 4,096
+   a side, u and v at the vertices within 8,192 texels and rows, and no more
+   than 4,096 of either per pixel, so that a pixel past the vertices still
+   reads inside +-2^15. A triangle outside them, or a texture, is drawn the
+   perspective way. */
+#define KEK_3D_AFFINE_TEXELS 8192.f
+#define KEK_3D_AFFINE_STEP 4096.f
+
+static int kek_3d_texel_plane_(const KEK_3D_Setup_* s, const float t[3], float bound,
+                               uint32_t* origin, uint32_t* dx, uint32_t* dy) {
+    KEK_3D_Plane_ p;
+    int k;
+
+    for (k = 0; k < 3; ++k) {
+        if (!(fabsf(t[k]) < bound)) {
+            return 0;
+        }
+    }
+    p = kek_3d_plane(s, t[0], t[1], t[2]);
+    if (!(fabsf(p.dx) < KEK_3D_AFFINE_STEP && fabsf(p.dy) < KEK_3D_AFFINE_STEP)) {
+        return 0;
+    }
+    *origin = (uint32_t)(int32_t)kek_3d_fixed16(p.origin);
+    *dx = (uint32_t)(int32_t)kek_3d_fixed16(p.dx);
+    *dy = (uint32_t)(int32_t)kek_3d_fixed16(p.dy);
+    return 1;
+}
+
+/* 0 when the triangle is outside the limits above, drawn nothing; 1 otherwise,
+   drawn or, if it covers no pixel, nothing to draw. Only for a texture the
+   masks can address, which is why the caller checks. */
+static int kek_3d_triangle_textured_affine_(KEK_engine* engine, KEK_3D_ProjectedVertex vertices[3],
+                                            const KEK_texture* texture) {
+    KEK_3D_Affine_ a;
+    float ut[3], vt[3];
+    int k;
+
+    if (texture->width > 4096 || texture->height > 4096) {
+        return 0;
+    }
+    for (k = 0; k < 3; ++k) {
+        float z = 1.f / vertices[k].inv_z;
+        ut[k] = vertices[k].u_over_z * z * (float)texture->width;
+        vt[k] = vertices[k].v_over_z * z * (float)texture->height;
+    }
+    if (!kek_3d_setup(vertices, &a.c.setup)) {
+        return 1;
+    }
+    if (!kek_3d_texel_plane_(&a.c.setup, ut, KEK_3D_AFFINE_TEXELS, &a.u_origin, &a.u_dx, &a.u_dy)
+        || !kek_3d_texel_plane_(&a.c.setup, vt, KEK_3D_AFFINE_TEXELS, &a.v_origin, &a.v_dx, &a.v_dy)) {
+        return 0;
+    }
+    kek_3d_common(engine, vertices, &a.c);
+    a.texture = texture;
+    a.width = (uint32_t)texture->width;
+    a.u_mask = a.width - 1u;
+    a.v_mask = ((uint32_t)texture->height - 1u) * a.width;
+    if (engine->texture_warp_mode == KEK_TEXTURE_WARP_REPEAT) {
+        a.u_lo = a.v_lo = INT32_MIN;
+        a.u_hi = a.v_hi = INT32_MAX;
+    } else {
+        a.u_lo = a.v_lo = 0;
+        a.u_hi = (int32_t)texture->width * 65536 - 32768;
+        a.v_hi = (int32_t)texture->height * 65536 - 32768;
+    }
+    a.fast_row = KEK_3D_AFFINE_FAST_ROW && kek_3d_affine_fast_row_(vertices, &a);
+    kek_3d_walk(engine, &a.c.setup, kek_3d_affine_span, &a);
+    return 1;
+}
+
 static KEK_3D_RASTER_ALIGN_ void kek_3d_triangle_textured_bounded_(KEK_engine* engine, KEK_3D_ProjectedVertex vertices[3], const KEK_texture* texture) {
     KEK_3D_Textured_ t;
     int log2_w = kek_3d_log2(texture->width);
     int log2_h = kek_3d_log2(texture->height);
 
+    if (log2_w >= 0 && log2_h >= 0 && log2_w + log2_h <= 16 && kek_3d_affine_small_(vertices)
+        && kek_3d_triangle_textured_affine_(engine, vertices, texture)) {
+        return;
+    }
     if (!kek_3d_setup(vertices, &t.c.setup)) {
         return;
     }

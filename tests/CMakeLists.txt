@@ -50,3 +50,4 @@ kek_add_test(test_clip_near)
 kek_add_test(test_input test_support.c)
 
 kek_add_test(test_camera_clip test_support.c)
+kek_add_test(test_affine test_support.c)

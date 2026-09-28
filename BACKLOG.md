@@ -182,6 +182,57 @@ too. With the camera moved up so that the cat fills most of the frame, the paced
   300-triangle room 11.1, the 2,700 room 19.3, the textured quad 7.6; about 3.5 times the Pentium
   100, for three times the clock. The Pentium II budget is not the hard one.
 
+  A separate, narrower optimization: an inline one-pixel affine-span path in
+  `kek/kek_3d.c` skips UV-step setup and the general texel loop when a row covers one pixel. The
+  cat's 500-frame instrumented run made 914,270 affine-span calls (about 1,829 per frame); 38.3%
+  were one pixel, 71.1% were at most four, and 88.9% at most eight:
+
+  | Span length | Calls | Share |
+  | --- | ---: | ---: |
+  | 1 | 349,860 | 38.3% |
+  | 2 | 129,120 | 14.1% |
+  | 3 | 97,975 | 10.7% |
+  | 4 | 72,865 | 8.0% |
+  | 5–8 | 163,785 | 17.9% |
+  | 9–16 | 87,980 | 9.6% |
+  | 17–24 | 12,130 | 1.3% |
+  | 25–31 | 1,370 | 0.15% |
+  | 32+ | 25 | <0.01% |
+
+  The result that supports keeping it is a same-executable A/B on the emulated Pentium 100: both
+  handlers were compiled into one binary and a runtime switch selected the baseline or candidate,
+  holding code layout constant. Cat-only runs bracketed the candidate with baseline runs:
+  21.292 → 20.676 → 20.677 → 21.295 ms/frame, with 3,875 painted pixels and checksum
+  `4636f895` every time (~2.9% faster). Then all 16 scenes were run with the candidate and baseline
+  in the same executable. Painted counts and checksums matched in every pair:
+
+  | Scene | Painted pixels | Baseline → one-pixel path, ms/frame | FPS change |
+  | --- | ---: | ---: | ---: |
+  | Clear only | 0 | 1.929 → 1.929 | +0.00% |
+  | Flat quad | 64,000 | 12.592 → 12.586 | +0.05% |
+  | Textured quad | 64,000 | 28.751 → 28.777 | −0.09% |
+  | Textured quad, shaded | 64,000 | 41.650 → 41.681 | −0.07% |
+  | Cube, flat | 18,800 | 5.792 → 5.834 | −0.72% |
+  | Cube, textured | 18,800 | 11.192 → 11.210 | −0.16% |
+  | Cube, textured, fog | 18,800 | 14.957 → 14.976 | −0.13% |
+  | Demo's 2D overlay | 1,497 | 2.380 → 2.379 | +0.04% |
+  | Cat, as in the demo | 3,875 | 21.285 → 20.673 | +2.96% |
+  | Cat behind the camera | 0 | 1.961 → 1.961 | 0.00% |
+  | Cat offscreen | 0 | 1.965 → 1.965 | 0.00% |
+  | Cat far off | 1 | 7.776 → 7.689 | +1.13% |
+  | Cat close up | 18,078 | 35.268 → 34.889 | +1.09% |
+  | Room, 300 triangles | 64,000 | 44.188 → 44.257 | −0.16% |
+  | Room, 2,700 triangles | 64,000 | 89.313 → 88.484 | +0.94% |
+  | Room and a hidden one | 64,000 | 49.077 → 49.085 | −0.02% |
+
+  Geometric-mean FPS change across the suite: +0.30%; gains are concentrated in the small-triangle
+  cat scenes, while the other scenes are effectively neutral at this measurement's resolution.
+  An earlier comparison of separate executables showed noisy broad regressions and was discarded;
+  matching the binary and code layout was necessary to make this result credible. A direct
+  constant-`du`/`dv` span step was slower by ~1.8%, and forcing the affine span handler `noinline`
+  was slower by ~6.3%; neither was kept. The one-pixel path is in the working source, not yet
+  committed.
+
 Geometry is small beside that, and float suits it. A second standalone loop — rotate, translate and
 project a vertex; set up a triangle's area and three attribute gradients — in cycles:
 

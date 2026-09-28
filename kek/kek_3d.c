@@ -1131,6 +1131,21 @@ static void kek_3d_affine_span(KEK_engine* engine, const void* context, int y, i
     if (a->c.shade_uniform) {
         kek_3d_dither_rows(&a->c, y, rows);
     }
+    /* Single-pixel rows are common on small models. There is no UV step to
+       derive and the general texel loop would only execute once. */
+    if (first == last) {
+        uint16_t depth = (uint16_t)(st.z >> 15);
+        if (depth > db[first]) {
+            uint32_t tu = (uint32_t)u_next;
+            uint32_t tv = (uint32_t)v_next * a->width;
+            uint32_t texel = pixels[((tv >> 16) & a->v_mask) | ((tu >> 16) & a->u_mask)];
+            const uint8_t* row = a->c.shade_uniform ? rows[first & 3]
+                                      : kek_3d_shade_row_stepped(engine, st.s, first, y);
+            db[first] = depth;
+            fb[first] = row[texel];
+        }
+        return;
+    }
     while (x <= last) {
         int count = last - x + 1;
         int steps = count > KEK_3D_SPAN ? KEK_3D_SPAN : count - 1;

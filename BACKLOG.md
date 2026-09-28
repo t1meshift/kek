@@ -175,6 +175,13 @@ too. With the camera moved up so that the cat fills most of the frame, the paced
   room, at 64 by 13,800 and 2,800, and at 64 the lines of a near wall wobble. The cat, whose
   triangles are small, does not change.
 
+  Other builds and machines, the bench at the defaults. `-O3`, which is what the CMake Release
+  build is, against the `-O2` the DOS scripts use, on the Pentium 100: the cat 7% and the 2,700
+  room 6% faster, the long-span quad 3% slower. On a Pentium II 300 (86Box, Deschutes on a
+  P2B-LS; `-march=pentium2` against `-march=pentium` is a few per cent): the cat 4.8 ms, the
+  300-triangle room 11.1, the 2,700 room 19.3, the textured quad 7.6; about 3.5 times the Pentium
+  100, for three times the clock. The Pentium II budget is not the hard one.
+
 Geometry is small beside that, and float suits it. A second standalone loop — rotate, translate and
 project a vertex; set up a triangle's area and three attribute gradients — in cycles:
 

@@ -470,6 +470,16 @@ static int64_t kek_3d_round(double value) {
     return (int64_t)(bits & 0x7FFFFFFFFFFFFFFFULL) - (int64_t)0x4338000000000000LL;
 }
 
+/* The same rounding for a value known to be within 2^31, as a 32-bit integer:
+   the low word of the double is all of it, and no 64-bit arithmetic runs. */
+static int32_t kek_3d_round32(double value) {
+    double rounded = value + 6755399441055744.0;
+    uint64_t bits;
+
+    memcpy(&bits, &rounded, sizeof(bits));
+    return (int32_t)(uint32_t)bits;
+}
+
 /* 1/z as the span loop steps it: the depth buffer's value in 16.15. Clamped
    to what the buffer holds, as kek_3d_depth_quantise does, and NaN to the
    farthest; the top of the range leaves the int32_t a bit to spare.
@@ -679,8 +689,16 @@ static KEK_3D_RASTER_ALIGN_ void kek_3d_triangle_bounded_(KEK_engine* engine, KE
 /* Perspective-correct u and v are divided out every KEK_3D_SPAN pixels and
    stepped linearly in between, which is how Quake hid one divide behind
    sixteen pixels. Within a span the texture is affine: at this resolution,
-   and with a span this short, the error is a fraction of a texel. */
+   and with a span this short, the error is a fraction of a texel. A span's
+   setup is a chain of dependent x87 operations, the divide, the scaling and
+   the rounding, ~260 cycles on a Pentium whatever the span's length, so a
+   longer span is a faster surface and a less exact one: on the emulated
+   Pentium 100, 32 is 15% faster than 16 on a wall and 64 is 22%, at the
+   price of near walls that wobble at 64. Up to 64; KEK_3D_SPAN sets it. */
+#ifndef KEK_3D_SPAN
 #define KEK_3D_SPAN 16
+#endif
+KEK_STATIC_ASSERT_DECL(kek_3d_span_in_the_reciprocal_table, KEK_3D_SPAN >= 1 && KEK_3D_SPAN <= 64);
 
 typedef struct KEK_3D_Textured_ {
     KEK_3D_Common_ c;
@@ -702,7 +720,19 @@ typedef struct KEK_3D_Textured_ {
     int64_t u_most, v_most;
     /* How far 1/z, u/z and v/z move across a full span. */
     float span_inv_z, span_u_over_z, span_v_over_z;
+    /* When u and v at the triangle's vertices are all within 4,096 texels and
+       rows, so that they are within what 32 bits hold everywhere the spans
+       reach: a span's ends are then converted and stepped in 32 bits, v in
+       rows and multiplied by the width once clamped, as the affine path does;
+       past that, the 64-bit way above. */
+    int fast32;
+    uint32_t width;
+    float v_rows;
+    int32_t u_lo, u_hi, v_lo, v_hi;
 } KEK_3D_Textured_;
+
+static int32_t kek_3d_clamp32(int32_t t, int32_t lo, int32_t hi);
+static uint32_t kek_3d_texel_step32(uint32_t from, uint32_t to, int steps);
 
 static int kek_3d_log2(unsigned size) {
     int n = 0;
@@ -763,11 +793,15 @@ static int64_t kek_3d_texel_end(float uv, float scale, int64_t most, int repeat)
    gives is never larger than the true one, so the rounding toward the first
    end holds. */
 #define KEK_3D_RECIPROCAL_(n) (0xFFFFFFFFu / (n))
-static const uint32_t KEK_3D_RECIPROCAL[KEK_3D_SPAN + 1] = {
-    0, KEK_3D_RECIPROCAL_(1), KEK_3D_RECIPROCAL_(2), KEK_3D_RECIPROCAL_(3), KEK_3D_RECIPROCAL_(4),
-    KEK_3D_RECIPROCAL_(5), KEK_3D_RECIPROCAL_(6), KEK_3D_RECIPROCAL_(7), KEK_3D_RECIPROCAL_(8),
-    KEK_3D_RECIPROCAL_(9), KEK_3D_RECIPROCAL_(10), KEK_3D_RECIPROCAL_(11), KEK_3D_RECIPROCAL_(12),
-    KEK_3D_RECIPROCAL_(13), KEK_3D_RECIPROCAL_(14), KEK_3D_RECIPROCAL_(15), KEK_3D_RECIPROCAL_(16)
+#define KEK_3D_RECIPROCAL_4_(n) \
+    KEK_3D_RECIPROCAL_(n), KEK_3D_RECIPROCAL_((n) + 1), KEK_3D_RECIPROCAL_((n) + 2), KEK_3D_RECIPROCAL_((n) + 3)
+#define KEK_3D_RECIPROCAL_16_(n) \
+    KEK_3D_RECIPROCAL_4_(n), KEK_3D_RECIPROCAL_4_((n) + 4), KEK_3D_RECIPROCAL_4_((n) + 8), KEK_3D_RECIPROCAL_4_((n) + 12)
+/* Up to the longest span there can be, 64; entry 0 is never used. */
+static const uint32_t KEK_3D_RECIPROCAL[65] = {
+    0, KEK_3D_RECIPROCAL_(1), KEK_3D_RECIPROCAL_(2), KEK_3D_RECIPROCAL_(3),
+    KEK_3D_RECIPROCAL_4_(4), KEK_3D_RECIPROCAL_4_(8), KEK_3D_RECIPROCAL_4_(12),
+    KEK_3D_RECIPROCAL_16_(16), KEK_3D_RECIPROCAL_16_(32), KEK_3D_RECIPROCAL_16_(48)
 };
 
 static uint32_t kek_3d_texel_step(int64_t from, int64_t to, int steps) {
@@ -876,6 +910,7 @@ static void kek_3d_textured_span(KEK_engine* engine, const void* context, int y,
     float fx = (float)(first - t->c.setup.x0), fy = (float)(y - t->c.setup.y0);
     float u, v;
     int64_t tu_next = 0, tv_next = 0;
+    int32_t fu_next = 0, fv_next = 0;
     int x = first;
 
     kek_3d_row(&t->c, y, first, last, &st);
@@ -888,7 +923,10 @@ static void kek_3d_textured_span(KEK_engine* engine, const void* context, int y,
     p.v_over_z = t->v_over_z.origin + t->v_over_z.dx * fx + t->v_over_z.dy * fy;
     kek_3d_perspective(&p, &u, &v);
     /* Each span's end, converted, is where the next one starts. */
-    if (t->masked) {
+    if (t->fast32) {
+        fu_next = kek_3d_clamp32(kek_3d_round32((double)(u * t->u_scale) * 65536.0), t->u_lo, t->u_hi);
+        fv_next = kek_3d_clamp32(kek_3d_round32((double)(v * t->v_rows) * 65536.0), t->v_lo, t->v_hi);
+    } else if (t->masked) {
         tu_next = kek_3d_texel_end(u, t->u_scale, t->u_most, t->repeat);
         tv_next = kek_3d_texel_end(v, t->v_scale, t->v_most, t->repeat);
     }
@@ -924,16 +962,27 @@ static void kek_3d_textured_span(KEK_engine* engine, const void* context, int y,
             continue;
         }
 
-        tu_first = tu_next;
-        tv_first = tv_next;
-        tu_next = kek_3d_texel_end(u_end, t->u_scale, t->u_most, t->repeat);
-        tv_next = kek_3d_texel_end(v_end, t->v_scale, t->v_most, t->repeat);
-        du = kek_3d_texel_step(tu_first, tu_next, steps);
-        dv = kek_3d_texel_step(tv_first, tv_next, steps);
-        /* Unsigned from here, taking the low 32 bits: under REPEAT the
-           loop's adds wrap, and so does the texture. */
-        tu = (uint32_t)(uint64_t)tu_first;
-        tv = (uint32_t)(uint64_t)tv_first;
+        if (t->fast32) {
+            int32_t fu_first = fu_next, fv_first = fv_next;
+
+            fu_next = kek_3d_clamp32(kek_3d_round32((double)(u_end * t->u_scale) * 65536.0), t->u_lo, t->u_hi);
+            fv_next = kek_3d_clamp32(kek_3d_round32((double)(v_end * t->v_rows) * 65536.0), t->v_lo, t->v_hi);
+            du = kek_3d_texel_step32((uint32_t)fu_first, (uint32_t)fu_next, steps);
+            dv = kek_3d_texel_step32((uint32_t)fv_first, (uint32_t)fv_next, steps) * t->width;
+            tu = (uint32_t)fu_first;
+            tv = (uint32_t)fv_first * t->width;
+        } else {
+            tu_first = tu_next;
+            tv_first = tv_next;
+            tu_next = kek_3d_texel_end(u_end, t->u_scale, t->u_most, t->repeat);
+            tv_next = kek_3d_texel_end(v_end, t->v_scale, t->v_most, t->repeat);
+            du = kek_3d_texel_step(tu_first, tu_next, steps);
+            dv = kek_3d_texel_step(tv_first, tv_next, steps);
+            /* Unsigned from here, taking the low 32 bits: under REPEAT the
+               loop's adds wrap, and so does the texture. */
+            tu = (uint32_t)(uint64_t)tu_first;
+            tv = (uint32_t)(uint64_t)tv_first;
+        }
 
         end = x + count;
         if (t->c.shade_uniform) {
@@ -989,6 +1038,33 @@ typedef struct KEK_3D_Affine_ {
     int fast_row;
     uint32_t z_origin, z_dy, s_origin, s_dy;
 } KEK_3D_Affine_;
+
+/* Whether a perspective span's ends may be converted and stepped in 32 bits
+   (see KEK_3D_Textured_::fast32): a texture of up to 4,096 a side, and u and v
+   at every vertex within `bound` texels and rows. Both are linear over the
+   screen divided by a positive 1/z, so nothing inside the triangle is beyond
+   the vertices; checked as u/z * width < bound * 1/z, without the divide.
+   NaN fails every comparison and so takes the 64-bit way. */
+#define KEK_3D_PERSPECTIVE_TEXELS 4096.f
+#ifndef KEK_3D_PERSPECTIVE_FAST32
+#define KEK_3D_PERSPECTIVE_FAST32 1
+#endif
+
+static int kek_3d_texels_within_(const KEK_3D_ProjectedVertex v[3], const KEK_texture* texture, float bound) {
+    float w = (float)texture->width, h = (float)texture->height;
+    int k;
+
+    if (texture->width > 4096 || texture->height > 4096) {
+        return 0;
+    }
+    for (k = 0; k < 3; ++k) {
+        if (!(v[k].inv_z >= KEK_EPSILON && fabsf(v[k].u_over_z) * w < bound * v[k].inv_z
+              && fabsf(v[k].v_over_z) * h < bound * v[k].inv_z)) {
+            return 0;
+        }
+    }
+    return 1;
+}
 
 static int kek_3d_affine_small_(const KEK_3D_ProjectedVertex v[3]) {
     int lo = v[0].screen.x, hi = lo, i;
@@ -1231,6 +1307,17 @@ static KEK_3D_RASTER_ALIGN_ void kek_3d_triangle_textured_bounded_(KEK_engine* e
     t.span_inv_z = t.c.inv_z.dx * (float)KEK_3D_SPAN;
     t.span_u_over_z = t.u_over_z.dx * (float)KEK_3D_SPAN;
     t.span_v_over_z = t.v_over_z.dx * (float)KEK_3D_SPAN;
+    t.fast32 = t.masked && KEK_3D_PERSPECTIVE_FAST32 && kek_3d_texels_within_(vertices, texture, KEK_3D_PERSPECTIVE_TEXELS);
+    t.width = (uint32_t)texture->width;
+    t.v_rows = (float)texture->height;
+    if (t.repeat) {
+        t.u_lo = t.v_lo = INT32_MIN;
+        t.u_hi = t.v_hi = INT32_MAX;
+    } else if (t.fast32) {
+        t.u_lo = t.v_lo = 0;
+        t.u_hi = (int32_t)texture->width * 65536 - 32768;
+        t.v_hi = (int32_t)texture->height * 65536 - 32768;
+    }
     kek_3d_walk(engine, &t.c.setup, kek_3d_textured_span, &t);
 }
 

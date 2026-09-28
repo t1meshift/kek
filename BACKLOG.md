@@ -102,24 +102,49 @@ too. With the camera moved up so that the cat fills most of the frame, the paced
   here, chosen per triangle by its width, took the cat from 25.8 to 21.6 ms (`62981cb`), not the
   ~8–10 the estimate said: the row's divides were a small part of it. Large or deep triangles,
   walls and floors, keep the perspective path. What was measured, on the emulated Pentium 100 with
-  the affine path in and parts of the frame cut out in turn (bench, `--assets`, 50 frames):
+  the change in and parts of the frame cut out in turn (bench, `--assets`, 50 frames), the cat's
+  21.6 ms:
 
   | Part of the cat's frame | ms |
   | --- | --- |
   | The clear | 1.9 |
-  | Vertices and faces: transform, normals, light, projection, culling | ~6.1 |
-  | Triangle setup | ~2.3 |
-  | Walking the edges, empty spans | ~1.6 |
-  | `kek_3d_row`, depth and shade at a row's start (before the change) | ~2.9 |
-  | A row's texture ends (before the change) | ~4.7 |
-  | The pixel loops and their memory | ~6.0 |
+  | Vertices: transform, projection, fog (316 of them) | 2.0 |
+  | Faces: on-screen test, normal, back-face cull (608) | 2.1 |
+  | Faces: light and UVs | 1.0 |
+  | Faces: the vertices handed to the rasteriser | 0.4 |
+  | Triangle setup, and the walk over the rows with nothing done in them | 5.4 |
+  | A row's start: depth, shade, texture ends, steps | 5.8 |
+  | The pixel loops | 3.1 |
 
   The first try, a row's ends from int64 planes, saved 0.8%: 64-bit multiplies are a libgcc call on
   DJGPP, as costly as the divides they replaced. In 32 bits, modulo 2^32 for REPEAT and read signed
   for CLAMP, it was 2.8 ms, and depth and shade as fixed-point planes instead of `kek_3d_row` 1.4
   more. In the demo itself on the Pentium, uncapped: 31–40 fps before, 39–50 after. Frames differ
-  from the perspective ones by 5–12 pixels of 64,000. Width 16 rather than 48 costs 0.9 ms. Left in
-  the cat's 21.6 ms, by size: vertices and faces, triangle setup and walk, the pixel loops.
+  from the perspective ones by 5–12 pixels of 64,000. Width 16 rather than 48 costs 0.9 ms. What
+  is left is mostly the rasteriser's cost per triangle and per row, not the pixels: 11 ms of the 21.6
+  against 3 for the pixel loops.
+
+  Close enough to fill the frame (`cat, close up` in the bench, 20,600 pixels), the demo's worst
+  case: 46.3 ms without the affine path, 40.0 at width 48, 36.9 at any width. That is pixel-bound
+  at ~130 cycles a pixel where the loop is put at ~40; why is not known yet, overdraw and short
+  spans being the candidates.
+
+  A room to stand in, the way a level's first room would be drawn with nothing to skip yet (bench,
+  the inside of a 12 × 5 × 16 box, the camera at its centre turning, every wall a grid of quads
+  textured with the default texture), on the Pentium 100 at width 48:
+
+  | | ms | fps |
+  | --- | --- | --- |
+  | 300 triangles | 49.9 | 20 |
+  | 2,700 triangles | 90.1 | 11 |
+  | 300, and a copy of the room behind the far wall | 60.1 | 17 |
+
+  Every scene fills the frame, so the 40 ms the 2,400 extra triangles cost is the triangle: ~17 µs
+  each, ~1,700 cycles, what the cat's setup, walk and row starts come to as well. The copy behind
+  the wall shows nothing and costs 10 ms, a fifth more: with no visibility test a level costs what
+  all of it costs, not what is seen. The fill is ~45 ms of the 50, ~70 cycles a pixel against the
+  ~50 of the ideal loop above. Width at any value takes the 300-triangle room to 42.8 ms, but on a
+  wall that is a texture swimming, so the perspective path stays past 48.
 
 Geometry is small beside that, and float suits it. A second standalone loop — rotate, translate and
 project a vertex; set up a triangle's area and three attribute gradients — in cycles:

@@ -208,6 +208,12 @@ static void scene_cat_far(int frame) {
     draw_cat(frame, 30.f);
 }
 
+/* Close enough to fill most of the frame: big triangles, the worst the demo
+   shows. */
+static void scene_cat_close(int frame) {
+    draw_cat(frame, 2.4f);
+}
+
 /* The demo's 2D over the 3D: a palette strip with its numbers and the
    camera's position. */
 static void scene_overlay(int frame) {
@@ -221,6 +227,105 @@ static void scene_overlay(int frame) {
     }
     (void)snprintf(text, sizeof(text), "x: %.02f\ny: %.02f\nz: %.02f", (double)frame, 0., 0.);
     kek_2d_text_5x8(&e, &KEK_FONT_DEFAULT_5X8, (KEK_IVec2){ 30, 8 }, text, 9);
+}
+
+/* A room to stand in, the way a level's first room is drawn until something
+   smarter decides what to skip: the inside of a box, 12 x 5 x 16 units with
+   the camera at its centre, every wall a grid of quads and every quad two
+   triangles textured with the default texture. The grid is 5 or 15 quads a
+   side, 300 or 2,700 triangles in all, which is what tells what a triangle
+   costs from what a pixel does. The second draws a copy of the room behind
+   its far wall too: nothing the camera can see, but with no visibility test
+   it is transformed, culled, set up and rejected by depth all the same. */
+#define ROOM_CELL_MAX 15
+#define ROOM_WALLS 6
+#define ROOM_VERTS_MAX (ROOM_WALLS * (ROOM_CELL_MAX + 1) * (ROOM_CELL_MAX + 1))
+#define ROOM_FACES_MAX (ROOM_WALLS * ROOM_CELL_MAX * ROOM_CELL_MAX * 2)
+
+typedef struct Room {
+    KEK_model model;
+    KEK_model_vertex verts[ROOM_VERTS_MAX];
+    KEK_model_face faces[ROOM_FACES_MAX];
+    KEK_model_face_uv face_uvs[ROOM_FACES_MAX];
+} Room;
+
+static Room room_small, room_big;
+static KEK_FVec2 room_uvs[4] = { {0.f, 0.f}, {1.f, 0.f}, {0.f, 1.f}, {1.f, 1.f} };
+
+/* Each wall has an inward normal n and two axes u, v with u x v = n, so that
+   the triangles (p00, p10, p01) and (p10, p11, p01) wind the way the
+   back-face cull keeps them from inside. */
+static void build_room(Room* r, int cells, KEK_TextureHandle texture) {
+    /* Per wall: the axis held fixed and its side (0 or 255), then u and v. */
+    static const int WALL[ROOM_WALLS][4] = {
+        { 0, 0, 1, 2 }, { 0, 255, 2, 1 }, { 1, 0, 2, 0 },
+        { 1, 255, 0, 2 }, { 2, 0, 0, 1 }, { 2, 255, 1, 0 }
+    };
+    int wall, i, j, nv = 0, nf = 0;
+    int side = cells + 1;
+
+    for (wall = 0; wall < ROOM_WALLS; ++wall) {
+        int base = nv;
+
+        for (j = 0; j <= cells; ++j) {
+            for (i = 0; i <= cells; ++i) {
+                int c[3];
+                c[WALL[wall][0]] = WALL[wall][1];
+                c[WALL[wall][2]] = i * 255 / cells;
+                c[WALL[wall][3]] = j * 255 / cells;
+                r->verts[nv].x = (uint8_t)c[0];
+                r->verts[nv].y = (uint8_t)c[1];
+                r->verts[nv].z = (uint8_t)c[2];
+                ++nv;
+            }
+        }
+        for (j = 0; j < cells; ++j) {
+            for (i = 0; i < cells; ++i) {
+                uint16_t p00 = (uint16_t)(base + j * side + i), p10 = (uint16_t)(p00 + 1);
+                uint16_t p01 = (uint16_t)(p00 + side), p11 = (uint16_t)(p01 + 1);
+                r->faces[nf] = (KEK_model_face){ p00, p10, p01 };
+                r->face_uvs[nf++] = (KEK_model_face_uv){ 0, 1, 2 };
+                r->faces[nf] = (KEK_model_face){ p10, p11, p01 };
+                r->face_uvs[nf++] = (KEK_model_face_uv){ 1, 3, 2 };
+            }
+        }
+    }
+    r->model.verts = r->verts;
+    r->model.scale = (KEK_FVec3){ 12.f / 255.f, 5.f / 255.f, 16.f / 255.f };
+    r->model.offset = (KEK_FVec3){ -6.f, -2.5f, -8.f };
+    r->model.faces = r->faces;
+    r->model.face_colors = 0;
+    r->model.uvs = room_uvs;
+    r->model.face_uvs = r->face_uvs;
+    r->model.texture = texture;
+    r->model.owns_texture = 0;
+    r->model.verts_count = (uint16_t)nv;
+    r->model.faces_count = (uint16_t)nf;
+    r->model.colors_count = 0;
+    r->model.uvs_count = 4;
+    r->model.face_uvs_count = (uint16_t)nf;
+}
+
+/* The camera stays at the room's centre and turns, as a player looking round;
+   the room itself stays put, so a copy z units along is still behind a wall. */
+static void draw_room(int frame, KEK_model* model, float z) {
+    KEK_camera camera = KEK_DEFAULT_CAMERA;
+
+    camera.rotation.y = (float)frame * 0.05f;
+    kek_3d_draw_model(&e, model, &camera, (KEK_FVec3){ 0.f, 0.f, z }, (KEK_FVec3){ 0.f, 0.f, 0.f });
+}
+
+static void scene_room_small(int frame) {
+    draw_room(frame, &room_small.model, 0.f);
+}
+
+static void scene_room_big(int frame) {
+    draw_room(frame, &room_big.model, 0.f);
+}
+
+static void scene_room_hidden(int frame) {
+    draw_room(frame, &room_small.model, 0.f);
+    draw_room(frame, &room_small.model, 16.f);
 }
 
 typedef struct Scene {
@@ -240,7 +345,11 @@ static const Scene SCENES[] = {
     { "demo's 2D overlay", scene_overlay, 0 },
     { "cat, as in the demo", scene_cat, 1 },
     { "cat, behind the camera", scene_cat_behind, 1 },
-    { "cat, far off", scene_cat_far, 1 }
+    { "cat, far off", scene_cat_far, 1 },
+    { "cat, close up", scene_cat_close, 1 },
+    { "room, 300 triangles", scene_room_small, 0 },
+    { "room, 2700 triangles", scene_room_big, 0 },
+    { "room and a hidden one", scene_room_hidden, 0 }
 };
 
 static uint32_t checksum(void) {
@@ -307,6 +416,8 @@ int main(int argc, char** argv) {
     flat_cube.face_uvs = 0;
     flat_cube.uvs_count = 0;
     flat_cube.face_uvs_count = 0;
+    build_room(&room_small, 5, kek_default_texture_handle(&e));
+    build_room(&room_big, 15, kek_default_texture_handle(&e));
     if (assets_dir) {
         load_cat(assets_dir);
         if (!cat) {

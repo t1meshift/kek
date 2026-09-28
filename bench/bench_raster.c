@@ -204,6 +204,16 @@ static void scene_cat_behind(int frame) {
     draw_cat(frame, -4.5f);
 }
 
+/* The cat is in front of the camera but wholly beyond the right edge. */
+static void scene_cat_offscreen(int frame) {
+    KEK_camera camera = KEK_DEFAULT_CAMERA;
+
+    kek_3d_set_fog(&e, 6.f, 25.f);
+    kek_3d_draw_model(&e, cat, &camera, (KEK_FVec3){ 100.f, -1.f, 4.5f },
+                      (KEK_FVec3){ 0.f, (float)frame * 0.05f, 0.f });
+    kek_3d_set_fog(&e, 0.f, 0.f);
+}
+
 static void scene_cat_far(int frame) {
     draw_cat(frame, 30.f);
 }
@@ -345,6 +355,7 @@ static const Scene SCENES[] = {
     { "demo's 2D overlay", scene_overlay, 0 },
     { "cat, as in the demo", scene_cat, 1 },
     { "cat, behind the camera", scene_cat_behind, 1 },
+    { "cat, offscreen", scene_cat_offscreen, 1 },
     { "cat, far off", scene_cat_far, 1 },
     { "cat, close up", scene_cat_close, 1 },
     { "room, 300 triangles", scene_room_small, 0 },

@@ -1482,6 +1482,55 @@ static int kek_3d_screen_visible_(const KEK_engine* e, KEK_IVec2 sv[3]) {
         && kek_area_triangle_signed(sv) >= 1.f;
 }
 
+/* The model's byte coordinates are in [0, 255]. Test the transformed box
+   against a view-space plane using its exact support radius along that plane.
+   A small tolerance keeps float roundoff from rejecting a touching box. */
+static int kek_3d_model_outside_plane_(const KEK_Mat3* to_view, KEK_FVec3 center, KEK_FVec3 normal) {
+    const float half = 127.5f;
+    float distance, support, tolerance;
+
+    if (!kek_3d_finite_(center)) return 0;
+
+    distance = normal.x * center.x + normal.y * center.y + normal.z * center.z;
+    support = half * (fabsf(normal.x * to_view->m[0] + normal.y * to_view->m[3] + normal.z * to_view->m[6])
+                    + fabsf(normal.x * to_view->m[1] + normal.y * to_view->m[4] + normal.z * to_view->m[7])
+                    + fabsf(normal.x * to_view->m[2] + normal.y * to_view->m[5] + normal.z * to_view->m[8]));
+    if (!(distance == distance && support >= 0.f && support <= FLT_MAX)) return 0;
+    tolerance = 1.e-5f * (fabsf(distance) + support + 1.f);
+    return distance + support < -tolerance;
+}
+
+/* A cheap conservative reject before transforming every vertex. The expanded
+   left/top planes account for float-to-int truncation of slightly negative
+   screen coordinates on the all-in-front path. */
+#ifndef KEK_3D_MODEL_FRUSTUM_CULL
+#define KEK_3D_MODEL_FRUSTUM_CULL 1
+#endif
+static int kek_3d_model_outside_frustum_(const KEK_3D_Lens_* lens, const KEK_camera* camera,
+                                        const KEK_Mat3* to_view, KEK_FVec3 origin, KEK_engine* e) {
+    KEK_FVec3 left = {lens->focal_length, 0.f, lens->aspect_ratio * (1.f + 2.f / (float)e->w)};
+    KEK_FVec3 right = {-lens->focal_length, 0.f, lens->aspect_ratio};
+    KEK_FVec3 top = {0.f, -lens->focal_length, 1.f + 2.f / (float)e->h};
+    KEK_FVec3 bottom = {0.f, lens->focal_length, 1.f};
+    KEK_FVec3 center = kek_mat3_apply(*to_view, (KEK_FVec3){127.5f, 127.5f, 127.5f});
+    float z_radius, z_tolerance;
+
+    center.x += origin.x;
+    center.y += origin.y;
+    center.z += origin.z;
+    if (!kek_3d_finite_(center)) return 0;
+    z_radius = 127.5f * (fabsf(to_view->m[6]) + fabsf(to_view->m[7]) + fabsf(to_view->m[8]));
+    if (!(z_radius >= 0.f && z_radius <= FLT_MAX)) return 0;
+    z_tolerance = 1.e-5f * (fabsf(center.z) + z_radius + camera->far_plane + 1.f);
+    if (center.z + z_radius < camera->near_plane - z_tolerance
+        || center.z - z_radius > camera->far_plane + z_tolerance) return 1;
+
+    return kek_3d_model_outside_plane_(to_view, center, left)
+        || kek_3d_model_outside_plane_(to_view, center, right)
+        || kek_3d_model_outside_plane_(to_view, center, top)
+        || kek_3d_model_outside_plane_(to_view, center, bottom);
+}
+
 /* Clipped triangles still need the screen-space winding/coverage check. */
 static void kek_3d_draw_triangle_(KEK_engine* e, KEK_3D_ProjectedVertex pv[3], const KEK_texture* texture,
                                   uint8_t color) {
@@ -1591,14 +1640,6 @@ void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FV
     if (!kek_3d_camera_valid_(camera) || !kek_3d_finite_(pos) || !kek_3d_finite_(rotation)
         || !kek_3d_finite_(mdl->scale) || !kek_3d_finite_(mdl->offset)) return;
 
-    /* A model the arena has no room to transform is not drawn. */
-    view_verts = (KEK_FVec3*)kek_arena_temp(&e->arena, (size_t)mdl->verts_count * sizeof(KEK_FVec3));
-    projected = (KEK_3D_Projected_*)kek_arena_temp(&e->arena, (size_t)mdl->verts_count * sizeof(KEK_3D_Projected_));
-    if (!view_verts || !projected) {
-        kek_arena_temp_release(&e->arena, mark);
-        return;
-    }
-
     model_rot    = kek_mat3_from_euler(rotation);
     camera_rot = kek_3d_view_rotation_(camera->rotation);
     light_view   = kek_mat3_apply(camera_rot, e->light.direction);
@@ -1624,6 +1665,23 @@ void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FV
         origin.x - camera->position.x,
         origin.y - camera->position.y,
         origin.z - camera->position.z });
+
+    /* Large models wholly outside the view can be dropped before allocating
+       temporary vertex arrays or transforming every vertex. */
+#if KEK_3D_MODEL_FRUSTUM_CULL
+    if (mdl->verts_count >= 16 && kek_3d_model_outside_frustum_(&lens, camera, &to_view, origin, e)) {
+        kek_arena_temp_release(&e->arena, mark);
+        return;
+    }
+#endif
+
+    /* A model the arena has no room to transform is not drawn. */
+    view_verts = (KEK_FVec3*)kek_arena_temp(&e->arena, (size_t)mdl->verts_count * sizeof(KEK_FVec3));
+    projected = (KEK_3D_Projected_*)kek_arena_temp(&e->arena, (size_t)mdl->verts_count * sizeof(KEK_3D_Projected_));
+    if (!view_verts || !projected) {
+        kek_arena_temp_release(&e->arena, mark);
+        return;
+    }
 
     for (i = 0; i < mdl->verts_count; ++i) {
         KEK_model_vertex q = mdl->verts[i];

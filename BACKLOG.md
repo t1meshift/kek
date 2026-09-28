@@ -366,7 +366,7 @@ on the hash has the reasoning, the measurements and what was verified.
 
 ### Found on the way, not from a backlog item
 
-Current working tree: camera orientation now uses the transpose of the world rotation,
+`88f1b93`: camera orientation now uses the transpose of the world rotation,
 shared by point projection and model drawing. Projection checks its float coordinates before
 integer conversion; triangles beyond the ±2^20-pixel guard band take a bounded near/side
 clipping path with double intersections and interpolated UVs. Direct rasterizer calls reject
@@ -374,9 +374,8 @@ coordinates outside that band. Public signatures and resource formats are unchan
 
 Verified locally: 218 tests in 14 suites with GCC and Clang under ASan/UBSan (including
 float-cast-overflow), clang-tidy, and DJGPP cross-builds of the library, tests, benchmark and
-DOS demo. A separate Linux sanitizer job is now in native CI. This is a build check for DOS;
-no new emulator or hardware timing is claimed. The external DOS measurement setup stays outside
-this repository.
+DOS demo. A separate Linux sanitizer job is now in native CI. The external DOS measurement
+setup stays outside this repository.
 
 Native performance against `a62c07a`: GCC 16.2.1, Release (`-O3`), x86-64, CPU 2;
 three alternating before/after runs, 3,000 frames per scene, best of five rounds,
@@ -386,6 +385,16 @@ in every run. The largest median slowdown was 1.9%; the cat behind the camera im
 by 31.9% and the distant cat by 4.6%. Pixel loops are unchanged: public boundary checks
 wrap the internal rasterizers, native GCC/Clang align the hot functions to 64 bytes
 (DJGPP retains its default alignment), and vertex transforms stay inside their loop.
+
+Emulated, against `a62c07a` (86Box, DJGPP `-O2`, bench with `--assets`, best of five rounds,
+frame checksums identical). Pentium 100, 100 frames: the cat as in the demo 24.68 → 25.74 ms
+(+4.3%, the same at 10 frames), behind the camera 5.48 → 3.71 (−32.3%), far off 8.41 → 7.79
+(−7.4%), the cubes +0.2% to +0.5%, quads and the 2D overlay within 0.03%. So the 1.9% above
+is native only: on DOS the demo's cat is 4.3% slower. Two of the added checks were taken out
+one at a time (per-vertex finite test, the normal's overflow guard) and explain about 0.15 ms of
+the 1.09 ms; taking out the screen-bound checks crashes the rasteriser, so those were not
+measured. 486DX2-66, 10 frames, without the cat: everything within 0.25%. The affine path
+for small triangles, below, is worth far more than this.
 
 | | Was | Commit |
 | --- | --- | --- |

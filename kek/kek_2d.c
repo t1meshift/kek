@@ -71,7 +71,7 @@ void kek_2d_blit_texture(KEK_engine* engine, const KEK_texture* texture,
 }
 
 void kek_2d_blit_texture_region_transform(KEK_engine* engine, const KEK_texture* texture,
-                                          KEK_IRect2 source, KEK_2D_Transform transform,
+                                          KEK_IRect2 source, KEK_Transform2D transform,
                                           int transparent_index) {
     int64_t u0, v0, u1, v1;
     double c, s, min_x, min_y, max_x, max_y;
@@ -168,7 +168,7 @@ void kek_2d_blit_texture_region_transform(KEK_engine* engine, const KEK_texture*
 }
 
 void kek_2d_blit_texture_transform(KEK_engine* engine, const KEK_texture* texture,
-                                   KEK_2D_Transform transform, int transparent_index) {
+                                   KEK_Transform2D transform, int transparent_index) {
     KEK_IRect2 source;
     if (!texture) return;
     source.origin = (KEK_IVec2){0, 0};

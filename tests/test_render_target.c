@@ -78,7 +78,7 @@ void test_blit_texture_into_bound_target(void) {
     TEST_ASSERT_EQUAL_UINT8(4, target->data[3 * 5 + 4]);
     kek_2d_blit_texture_region_transform(&e, &source,
         (KEK_IRect2){{0, 0}, {2, 2}},
-        (KEK_2D_Transform){{2.f, 1.f}, {0.f, 0.f}, {1.5f, 1.5f}, 0.f}, 0);
+        (KEK_Transform2D){{2.f, 1.f}, {0.f, 0.f}, {1.5f, 1.5f}, 0.f}, 0);
     TEST_ASSERT_EQUAL_UINT8(3, target->data[1 * 5 + 3]);
     TEST_ASSERT_EQUAL_UINT8(4, target->data[2 * 5 + 2]);
     kek_target_restore(&e);

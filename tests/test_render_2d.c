@@ -484,7 +484,7 @@ void test_transformed_blit_scales_mirrors_rotates_and_uses_pivot(void) {
     uint8_t pixels[] = {1, 2, 3, 0};
     KEK_texture texture = {pixels, 2, 2};
     KEK_IRect2 full = { {0, 0}, {2, 2} };
-    KEK_2D_Transform t = { {10.f, 10.f}, {0.f, 0.f}, {1.5f, 1.5f}, 0.f };
+    KEK_Transform2D t = { {10.f, 10.f}, {0.f, 0.f}, {1.5f, 1.5f}, 0.f };
 
     kek_test_frame_attach(&e, 61, 37);
     memset(e.fb, 12, (size_t)e.w * e.h);
@@ -525,7 +525,7 @@ void test_transformed_atlas_blit_clips_and_preserves_depth(void) {
     uint8_t pixels[] = {1, 2, 3, 4, 5, 6, 7, 8};
     KEK_texture atlas = {pixels, 4, 2};
     KEK_IRect2 frame = { {2, 0}, {2, 2} };
-    KEK_2D_Transform t = { {-1.f, -1.f}, {0.f, 0.f}, {2.f, 2.f}, 0.f };
+    KEK_Transform2D t = { {-1.f, -1.f}, {0.f, 0.f}, {2.f, 2.f}, 0.f };
     size_t s;
 
     for (s = 0; s < SIZE_COUNT; ++s) {
@@ -547,7 +547,7 @@ void test_transformed_atlas_blit_clips_and_preserves_depth(void) {
         TEST_ASSERT_EQUAL_UINT8(12, kek_test_frame_pixel(&e, 12, 10));
         kek_test_frame_assert_guards();
         frame.origin.x = 2;
-        t = (KEK_2D_Transform){ {-1.f, -1.f}, {0.f, 0.f}, {2.f, 2.f}, 0.f };
+        t = (KEK_Transform2D){ {-1.f, -1.f}, {0.f, 0.f}, {2.f, 2.f}, 0.f };
     }
 }
 
@@ -555,7 +555,7 @@ void test_transformed_identity_matches_region_blit_and_invalid_inputs_draw_nothi
     uint8_t pixels[] = {1, 0, 2, 3, 4, 5};
     KEK_texture texture = {pixels, 3, 2};
     KEK_IRect2 frame = { {-1, 0}, {4, 2} };
-    KEK_2D_Transform t = { {5.f, 7.f}, {1.f, 2.f}, {1.f, 1.f}, 0.f };
+    KEK_Transform2D t = { {5.f, 7.f}, {1.f, 2.f}, {1.f, 1.f}, 0.f };
     uint8_t reference[61 * 37];
 
     kek_test_frame_attach(&e, 61, 37);
@@ -580,7 +580,7 @@ void test_transformed_identity_matches_region_blit_and_invalid_inputs_draw_nothi
 void test_whole_texture_transform_matches_full_region(void) {
     uint8_t pixels[] = {1, 0, 2, 3, 4, 5};
     KEK_texture texture = {pixels, 3, 2};
-    KEK_2D_Transform t = { {12.f, 9.f}, {1.5f, 1.f}, {2.f, 1.5f}, 0.4f };
+    KEK_Transform2D t = { {12.f, 9.f}, {1.5f, 1.f}, {2.f, 1.5f}, 0.4f };
     uint8_t reference[61 * 37];
 
     kek_test_frame_attach(&e, 61, 37);

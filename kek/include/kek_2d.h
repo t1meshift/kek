@@ -38,19 +38,19 @@ void kek_2d_blit_texture_region(KEK_engine* engine, const KEK_texture* texture,
    mirrors it. Rotation is in radians, positive clockwise on screen. Samples
    the nearest palette index and keeps the region blit's transparency, clipping
    and depth behavior. Non-finite parameters or a zero scale draw nothing. */
-typedef struct KEK_2D_Transform {
+typedef struct KEK_Transform2D {
     KEK_FVec2 position;
     KEK_FVec2 pivot;
     KEK_FVec2 scale;
     float rotation;
-} KEK_2D_Transform;
+} KEK_Transform2D;
 
 void kek_2d_blit_texture_region_transform(KEK_engine* engine, const KEK_texture* texture,
-                                          KEK_IRect2 source, KEK_2D_Transform transform,
+                                          KEK_IRect2 source, KEK_Transform2D transform,
                                           int transparent_index);
 /* Transform the entire texture without constructing a source rectangle. */
 void kek_2d_blit_texture_transform(KEK_engine* engine, const KEK_texture* texture,
-                                   KEK_2D_Transform transform, int transparent_index);
+                                   KEK_Transform2D transform, int transparent_index);
 /* Convenience wrapper for the entire texture. */
 void kek_2d_blit_texture(KEK_engine* engine, const KEK_texture* texture,
                          KEK_IVec2 dest, int transparent_index);

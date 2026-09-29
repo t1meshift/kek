@@ -79,6 +79,7 @@ int kek_init(KEK_engine* e, const KEK_desc* desc, void* memory, size_t size) {
     result.light.ambient = 0.25f;
     result.light.fog_start = 0.f;
     result.light.fog_end = 0.f;
+    result.light.fog_color = 0;
     memset(&result.keyboard, 0, sizeof(result.keyboard));
 
     memcpy(result.palette, KEK_DEFAULT_PALETTE, 256 * sizeof(KEK_palette_item));

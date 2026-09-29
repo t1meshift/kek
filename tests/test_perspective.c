@@ -29,6 +29,7 @@ static KEK_3D_ProjectedVertex vertex(int x, int y, float depth, float uv_scale) 
     v.u_over_z = (((float)x + 0.37f) / 64.f) * uv_scale * v.inv_z;
     v.v_over_z = (((float)y + 0.61f) / 64.f) * uv_scale * v.inv_z;
     v.shade = 0.f;
+    v.fog = 0.f;
     return v;
 }
 

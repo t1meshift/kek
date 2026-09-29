@@ -53,6 +53,7 @@ static char kek_3d_depth_test(KEK_engine* engine, uint16_t x, uint16_t y, float 
    darker row is used instead. */
 #define KEK_3D_SHADE_ONE 16
 #define KEK_3D_SHADE_MAX ((KEK_PALETTE_SHADING_LEVELS - 1) * KEK_3D_SHADE_ONE)
+#define KEK_3D_FOG_ONE 65536
 
 /* Ordered dither thresholds, 0..15. A fraction f of a level puts the darker
    row on exactly f of every 16 pixels in each 4x4 tile, spread as evenly as
@@ -64,6 +65,22 @@ static const uint8_t KEK_3D_BAYER4[4][4] = {
     {  3, 11,  1,  9 },
     { 15,  7, 13,  5 }
 };
+
+/* Offset fog's pattern from shade's so their two decisions do not lock
+   together on the same pixels. */
+static const uint8_t* kek_3d_fog_thresholds(int y) {
+    return KEK_3D_BAYER4[(y + 1) & 3];
+}
+
+static int32_t kek_3d_fog_fixed(float fog) {
+    if (!(fog > 0.f)) return 0;
+    if (fog >= 1.f) return KEK_3D_FOG_ONE;
+    return (int32_t)(fog * (float)KEK_3D_FOG_ONE);
+}
+
+static int kek_3d_fog_pixel(int32_t fog, const uint8_t thresholds[4], int x) {
+    return fog > ((int32_t)thresholds[(x + 2) & 3] * 2 + 1) * (KEK_3D_FOG_ONE / 32);
+}
 
 /* NaN and anything below zero come out unshaded rather than reaching the
    int conversion. */
@@ -89,8 +106,8 @@ static const uint8_t* kek_3d_shade_row(const KEK_engine* engine, int shade_fixed
     return engine->shading_palette + (size_t)256 * (size_t)level;
 }
 
-/* One conversion for the whole triangle when its vertices agree, which they
-   do whenever there is no fog: the face's light is one value. */
+/* One conversion for the whole triangle when its vertices agree, which flat
+   face lighting does even when fog varies separately. */
 static int kek_3d_shade_uniform(const KEK_3D_ProjectedVertex vertices[3], int* out_shade_fixed) {
     int s0 = kek_3d_shade_fixed(vertices[0].shade);
 
@@ -236,6 +253,7 @@ char kek_3d_project_vertex(KEK_engine* engine, KEK_camera* camera, KEK_FVec3 p, 
     result.u_over_z = 0.f;
     result.v_over_z = 0.f;
     result.shade = 0.f;
+    result.fog = 0.f;
     *out_vertex = result;
     return 1;
 }
@@ -536,14 +554,14 @@ static int32_t kek_3d_span_step(int32_t from, int32_t to, int n) {
     return n > 0 ? (to - from) / n : 0;
 }
 
-/* What both rasterisers work out once per triangle for depth and shade, so
-   that a row starts with one evaluation of each plane rather than two and a
-   divide. */
+/* What both rasterisers work out once per triangle for depth, shade and fog.
+   The un-fogged row retains its single plane evaluation per attribute. */
 typedef struct KEK_3D_Common_ {
     KEK_3D_Setup_ setup;
-    KEK_3D_Plane_ inv_z, shade;
+    KEK_3D_Plane_ inv_z, shade, fog;
     int shade_fixed;
     int shade_uniform;
+    int fog_active;
     /* A uniform shade's two shading rows, as kek_3d_shade_row picks between
        them: the one at its whole level, and how much of the next it has. */
     const uint8_t* shade_row;
@@ -559,6 +577,13 @@ static void kek_3d_common(const KEK_engine* engine, const KEK_3D_ProjectedVertex
 
     c->inv_z = kek_3d_plane(&c->setup, vertices[0].inv_z, vertices[1].inv_z, vertices[2].inv_z);
     c->shade = kek_3d_plane(&c->setup, vertices[0].shade, vertices[1].shade, vertices[2].shade);
+    c->fog_active = vertices[0].fog > 0.f || vertices[1].fog > 0.f || vertices[2].fog > 0.f;
+    if (c->fog_active) {
+        c->fog = kek_3d_plane(&c->setup,
+            vertices[0].fog * vertices[0].inv_z,
+            vertices[1].fog * vertices[1].inv_z,
+            vertices[2].fog * vertices[2].inv_z);
+    }
     c->shade_uniform = kek_3d_shade_uniform(vertices, &c->shade_fixed);
     c->shade_row = engine->shading_palette + (size_t)256 * (size_t)(c->shade_fixed / KEK_3D_SHADE_ONE);
     c->shade_fraction = c->shade_fixed % KEK_3D_SHADE_ONE;
@@ -588,6 +613,7 @@ typedef struct KEK_3D_Row_ {
        the range that step wraps rather than overflows. */
     uint32_t z, dz;
     int32_t s, ds;
+    int32_t f, df;
 } KEK_3D_Row_;
 
 /* The step is the plane's own while it keeps the row's far end in range —
@@ -611,6 +637,8 @@ static void kek_3d_row(const KEK_3D_Common_* c, int y, int first, int last, KEK_
 
     r->s = 0;
     r->ds = 0;
+    r->f = 0;
+    r->df = 0;
     if (!c->shade_uniform) {
         int32_t s = kek_3d_shade_span_fixed(c->shade.origin + c->shade.dx * fx + c->shade.dy * fy);
         int64_t s_end = (int64_t)s + (int64_t)n * c->shade_dx;
@@ -621,6 +649,19 @@ static void kek_3d_row(const KEK_3D_Common_* c, int y, int first, int last, KEK_
             r->ds = kek_3d_span_step(s, kek_3d_shade_span_fixed(kek_3d_plane_at(c->shade, &c->setup, last, y)), n);
         }
     }
+}
+
+/* The plane stores fog / z. Dividing by 1 / z recovers the value at the
+   pixel, even when one triangle covers a large range of view depths. */
+static int32_t kek_3d_fog_at(const KEK_3D_Common_* c, int x, int y) {
+    float inv_z = kek_3d_plane_at(c->inv_z, &c->setup, x, y);
+    if (!(inv_z > 0.f)) return 0;
+    return kek_3d_fog_fixed(kek_3d_plane_at(c->fog, &c->setup, x, y) / inv_z);
+}
+
+static void kek_3d_fog_span(const KEK_3D_Common_* c, int y, int first, int last, KEK_3D_Row_* r) {
+    r->f = kek_3d_fog_at(c, first, y);
+    r->df = kek_3d_span_step(r->f, kek_3d_fog_at(c, last, y), last - first);
 }
 
 typedef struct KEK_3D_Flat_ {
@@ -636,7 +677,27 @@ static void kek_3d_flat_span(KEK_engine* engine, const void* context, int y, int
     int x;
 
     kek_3d_row(&f->c, y, first, last, &r);
-    if (f->c.shade_uniform) {
+    if (f->c.fog_active) {
+        const uint8_t* thresholds = kek_3d_fog_thresholds(y);
+        const uint8_t* rows[4] = {0};
+        if (f->c.shade_uniform) kek_3d_dither_rows(&f->c, y, rows);
+        for (x = first; x <= last;) {
+            int end = x + 31 < last ? x + 31 : last;
+            kek_3d_fog_span(&f->c, y, x, end, &r);
+            for (; x <= end; ++x) {
+                uint16_t depth = (uint16_t)(r.z >> 15);
+                if (depth > db[x]) {
+                    db[x] = depth;
+                    fb[x] = kek_3d_fog_pixel(r.f, thresholds, x) ? engine->light.fog_color
+                        : f->c.shade_uniform ? rows[x & 3][f->color]
+                        : kek_3d_shade_row_stepped(engine, r.s, x, y)[f->color];
+                }
+                r.z += r.dz;
+                r.s += r.ds;
+                r.f += r.df;
+            }
+        }
+    } else if (f->c.shade_uniform) {
         /* One shade for the triangle: the dither leaves four inks a row. */
         const uint8_t* rows[4];
         uint8_t ink[4];
@@ -833,17 +894,40 @@ static void kek_3d_textured_pixels_sampled(KEK_engine* engine, const KEK_3D_Text
     float dv = steps > 0 ? (v_end - v) / (float)steps : 0.f;
     int i;
 
+    if (!t->c.fog_active) {
+        for (i = 0; i < count; ++i, ++x) {
+            uint16_t depth = (uint16_t)(st->z >> 15);
+            if (depth > db[x]) {
+                uint8_t texel = kek_texture_sample(engine, t->texture, u, v);
+                const uint8_t* row = t->c.shade_uniform ? kek_3d_shade_row(engine, t->c.shade_fixed, x, y)
+                                                        : kek_3d_shade_row_stepped(engine, st->s, x, y);
+                db[x] = depth;
+                fb[x] = row[texel];
+            }
+            st->z += st->dz;
+            st->s += st->ds;
+            u += du;
+            v += dv;
+        }
+        return;
+    }
+
     for (i = 0; i < count; ++i, ++x) {
         uint16_t depth = (uint16_t)(st->z >> 15);
         if (depth > db[x]) {
-            uint8_t texel = kek_texture_sample(engine, t->texture, u, v);
-            const uint8_t* row = t->c.shade_uniform ? kek_3d_shade_row(engine, t->c.shade_fixed, x, y)
-                                                    : kek_3d_shade_row_stepped(engine, st->s, x, y);
             db[x] = depth;
-            fb[x] = row[texel];
+            if (kek_3d_fog_pixel(st->f, kek_3d_fog_thresholds(y), x)) {
+                fb[x] = engine->light.fog_color;
+            } else {
+                uint8_t texel = kek_texture_sample(engine, t->texture, u, v);
+                const uint8_t* row = t->c.shade_uniform ? kek_3d_shade_row(engine, t->c.shade_fixed, x, y)
+                                                        : kek_3d_shade_row_stepped(engine, st->s, x, y);
+                fb[x] = row[texel];
+            }
         }
         st->z += st->dz;
         st->s += st->ds;
+        st->f += st->df;
         u += du;
         v += dv;
     }
@@ -895,6 +979,47 @@ static uint32_t kek_3d_texels_shaded(uint16_t* db, uint8_t* fb, int x, int end, 
         tv += dv;
     }
     *s = shade;
+    return z;
+}
+
+/* Fogged textured spans keep light and fog independent. The un-fogged calls
+   above retain their shorter, old pixel loops. */
+static uint32_t kek_3d_texels_fog(uint16_t* db, uint8_t* fb, int x, int end,
+                                  const uint8_t* const rows[4], const uint8_t* shading,
+                                  const uint8_t shade_bayer[4], const uint8_t fog_bayer[4],
+                                  uint8_t fog_color, const uint8_t* pixels, uint32_t u_mask, uint32_t v_mask,
+                                  uint32_t z, uint32_t dz, int32_t* s, int32_t ds, int32_t* f, int32_t df,
+                                  uint32_t tu, uint32_t du, uint32_t tv, uint32_t dv) {
+    const int32_t shade_most = (int32_t)KEK_3D_SHADE_MAX << KEK_3D_SHADE_FRACTION_BITS;
+    int32_t shade = *s, fog = *f;
+
+    for (; x < end; ++x) {
+        uint16_t depth = (uint16_t)(z >> 15);
+        if (depth > db[x]) {
+            db[x] = depth;
+            if (kek_3d_fog_pixel(fog, fog_bayer, x)) {
+                fb[x] = fog_color;
+            } else {
+                uint8_t texel = pixels[((tv >> 16) & v_mask) | ((tu >> 16) & u_mask)];
+                if (rows) {
+                    fb[x] = rows[x & 3][texel];
+                } else {
+                    uint32_t fixed = (uint32_t)(shade < 0 ? 0 : shade > shade_most ? shade_most : shade)
+                        >> KEK_3D_SHADE_FRACTION_BITS;
+                    uint32_t level = fixed / KEK_3D_SHADE_ONE +
+                        (fixed % KEK_3D_SHADE_ONE > shade_bayer[x & 3]);
+                    fb[x] = shading[((size_t)level << 8) + texel];
+                }
+            }
+        }
+        z += dz;
+        shade += ds;
+        fog += df;
+        tu += du;
+        tv += dv;
+    }
+    *s = shade;
+    *f = fog;
     return z;
 }
 
@@ -952,6 +1077,9 @@ static void kek_3d_textured_span(KEK_engine* engine, const void* context, int y,
             p.v_over_z += t->v_over_z.dx * advance;
         }
         kek_3d_perspective(&p, &u_end, &v_end);
+        if (t->c.fog_active) {
+            kek_3d_fog_span(&t->c, y, x, x + count - 1, &st);
+        }
 
         if (!t->masked) {
             kek_3d_textured_pixels_sampled(engine, t, &st, y, x, count, steps, u, v, u_end, v_end);
@@ -984,7 +1112,14 @@ static void kek_3d_textured_span(KEK_engine* engine, const void* context, int y,
         }
 
         end = x + count;
-        if (t->c.shade_uniform) {
+        if (t->c.fog_active) {
+            st.z = kek_3d_texels_fog(db, fb, x, end, t->c.shade_uniform ? rows : 0,
+                                      engine->shading_palette, KEK_3D_BAYER4[y & 3],
+                                      kek_3d_fog_thresholds(y), engine->light.fog_color, pixels,
+                                      t->u_mask, t->v_mask, st.z, st.dz, &st.s, st.ds, &st.f, st.df,
+                                      tu, du, tv, dv);
+            x = end;
+        } else if (t->c.shade_uniform) {
             st.z = kek_3d_texels(db, fb, x, end, rows, pixels, t->u_mask, t->v_mask, st.z, st.dz, tu, du, tv, dv);
             x = end;
         } else {
@@ -1134,6 +1269,7 @@ static void kek_3d_affine_span(KEK_engine* engine, const void* context, int y, i
     /* Single-pixel rows are common on small models. There is no UV step to
        derive and the general texel loop would only execute once. */
     if (first == last) {
+        if (a->c.fog_active) kek_3d_fog_span(&a->c, y, first, first, &st);
         uint16_t depth = (uint16_t)(st.z >> 15);
         if (depth > db[first]) {
             uint32_t tu = (uint32_t)u_next;
@@ -1142,7 +1278,8 @@ static void kek_3d_affine_span(KEK_engine* engine, const void* context, int y, i
             const uint8_t* row = a->c.shade_uniform ? rows[first & 3]
                                       : kek_3d_shade_row_stepped(engine, st.s, first, y);
             db[first] = depth;
-            fb[first] = row[texel];
+            fb[first] = a->c.fog_active && kek_3d_fog_pixel(st.f, kek_3d_fog_thresholds(y), first)
+                ? engine->light.fog_color : row[texel];
         }
         return;
     }
@@ -1162,7 +1299,14 @@ static void kek_3d_affine_span(KEK_engine* engine, const void* context, int y, i
         du = kek_3d_texel_step32((uint32_t)u_first, (uint32_t)u_next, steps);
         dv = kek_3d_texel_step32((uint32_t)v_first, (uint32_t)v_next, steps) * a->width;
         end = x + count;
-        if (a->c.shade_uniform) {
+        if (a->c.fog_active) {
+            kek_3d_fog_span(&a->c, y, x, end - 1, &st);
+            st.z = kek_3d_texels_fog(db, fb, x, end, a->c.shade_uniform ? rows : 0,
+                                      engine->shading_palette, KEK_3D_BAYER4[y & 3],
+                                      kek_3d_fog_thresholds(y), engine->light.fog_color, pixels,
+                                      a->u_mask, a->v_mask, st.z, st.dz, &st.s, st.ds, &st.f, st.df,
+                                      tu_first, du, tv_first, dv);
+        } else if (a->c.shade_uniform) {
             st.z = kek_3d_texels(db, fb, x, end, rows, pixels, a->u_mask, a->v_mask, st.z, st.dz,
                                  tu_first, du, tv_first, dv);
         } else {
@@ -1287,7 +1431,7 @@ static int kek_3d_triangle_textured_affine_(KEK_engine* engine, KEK_3D_Projected
         a.u_hi = (int32_t)texture->width * 65536 - 32768;
         a.v_hi = (int32_t)texture->height * 65536 - 32768;
     }
-    a.fast_row = KEK_3D_AFFINE_FAST_ROW && kek_3d_affine_fast_row_(vertices, &a);
+    a.fast_row = KEK_3D_AFFINE_FAST_ROW && !a.c.fog_active && kek_3d_affine_fast_row_(vertices, &a);
     kek_3d_walk(engine, &a.c.setup, kek_3d_affine_span, &a);
     return 1;
 }
@@ -1365,6 +1509,10 @@ void kek_3d_blit_vertex(KEK_engine* engine, KEK_3D_ProjectedVertex vertex, uint8
         return;
     }
 
+    if (kek_3d_fog_pixel(kek_3d_fog_fixed(vertex.fog),
+                         kek_3d_fog_thresholds(vertex.screen.y), vertex.screen.x)) {
+        pixel = engine->light.fog_color;
+    }
     kek_3d_blit_depth(engine, (uint16_t)vertex.screen.x, (uint16_t)vertex.screen.y, vertex.inv_z, pixel);
 }
 
@@ -1414,6 +1562,10 @@ void kek_3d_set_light(KEK_engine* engine, KEK_FVec3 direction, float ambient) {
 void kek_3d_set_fog(KEK_engine* engine, float start, float end) {
     engine->light.fog_start = start;
     engine->light.fog_end = end;
+}
+
+void kek_3d_set_fog_color(KEK_engine* engine, uint8_t color) {
+    engine->light.fog_color = color;
 }
 
 /* cross(b - a, c - a), in view space: it points out of the face, the way the
@@ -1466,17 +1618,11 @@ static float kek_3d_face_shade(KEK_FVec3 normal, KEK_FVec3 light_view, float amb
     return (1.f - ambient) * (1.f - lambert) * (float)(KEK_PALETTE_SHADING_LEVELS - 1);
 }
 
-/* The fog at one view depth, in levels, which a vertex adds to its face's
-   shade. Per vertex, after the near clip, so a face that runs into the
-   distance darkens along its length; the rasteriser interpolates it in screen
-   space, without the perspective correction the UVs get — at four levels and
-   a dither nobody sees the difference. */
+/* Keep coverage unclamped at vertices. Perspective interpolation reconstructs
+   view depth before clamping at pixels, including on large floor triangles. */
 static float kek_3d_fog(const KEK_light* light, float z) {
     if (light->fog_end > light->fog_start) {
-        float fog = (z - light->fog_start) / (light->fog_end - light->fog_start);
-        if (fog > 0.f) {
-            return (fog < 1.f ? fog : 1.f) * (float)(KEK_PALETTE_SHADING_LEVELS - 1);
-        }
+        return (z - light->fog_start) / (light->fog_end - light->fog_start);
     }
     return 0.f;
 }
@@ -1625,7 +1771,7 @@ static void kek_3d_clip_sides_(KEK_engine* e, const KEK_3D_Lens_* lens, float ne
             {(int)x, (int)y}, (float)in[i].z, (float)inv_z,
             texture ? (float)(in[i].u * inv_z) : 0.f,
             texture ? (float)(in[i].v * inv_z) : 0.f,
-            shade + kek_3d_fog(&e->light, (float)in[i].z)};
+            shade, kek_3d_fog(&e->light, (float)in[i].z)};
     }
     for (i = 1; i + 1 < count; ++i) {
         KEK_3D_ProjectedVertex triangle[3] = {projected[0], projected[i], projected[i + 1]};
@@ -1794,7 +1940,8 @@ void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FV
                 pv[k].inv_z    = p->inv_z;
                 pv[k].u_over_z = face_is_textured ? fuv[k].x * p->inv_z : 0.f;
                 pv[k].v_over_z = face_is_textured ? fuv[k].y * p->inv_z : 0.f;
-                pv[k].shade    = face_shade + p->fog;
+                pv[k].shade    = face_shade;
+                pv[k].fog      = p->fog;
             }
             if (face_texture) {
                 kek_3d_triangle_textured_bounded_(e, pv, face_texture);
@@ -1820,7 +1967,8 @@ void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FV
             clipped[k].depth = cv[k].z;
             clipped[k].u_over_z = face_is_textured ? cuv[k].x * clipped[k].inv_z : 0.f;
             clipped[k].v_over_z = face_is_textured ? cuv[k].y * clipped[k].inv_z : 0.f;
-            clipped[k].shade = face_shade + kek_3d_fog(&e->light, cv[k].z);
+            clipped[k].shade = face_shade;
+            clipped[k].fog = kek_3d_fog(&e->light, cv[k].z);
         }
         if (k != cn) {
             kek_3d_clip_sides_(e, &lens, near, fv, fuv, face_shade, face_texture, color);

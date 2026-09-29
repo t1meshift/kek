@@ -106,16 +106,37 @@ void test_clipped_texture_and_fog_keep_their_attributes(void) {
     const KEK_FVec3 positions[3] = {{-1e8f, -1e8f, 3.f}, {0.f, 1e8f, 3.f}, {1e8f, -1e8f, 3.f}};
     static uint8_t unshaded[KEK_TEST_WIDTH * KEK_TEST_HEIGHT];
     size_t i;
+    int fogged = 0, textured = 0;
     triangle(positions, 0, 1);
     memcpy(unshaded, e.fb, sizeof(unshaded));
     /* All depths are three: every covered pixel must have the same depth. */
     for (i = 0; i < sizeof(unshaded); ++i) TEST_ASSERT_GREATER_THAN_UINT16(0, e.db[i]);
     kek_flush_buffers(&e);
-    kek_3d_set_fog(&e, 1.f, 2.f);
+    kek_3d_set_fog(&e, 2.f, 4.f);
+    kek_3d_set_fog_color(&e, 77);
     triangle(positions, 0, 1);
     for (i = 0; i < sizeof(unshaded); ++i) {
-        TEST_ASSERT_EQUAL_UINT8(e.shading_palette[(KEK_PALETTE_SHADING_LEVELS - 1) * 256 + unshaded[i]], e.fb[i]);
+        TEST_ASSERT_TRUE(e.fb[i] == 77 || e.fb[i] == unshaded[i]);
+        fogged += e.fb[i] == 77;
+        textured += e.fb[i] == unshaded[i] && e.fb[i] != 77;
     }
+    TEST_ASSERT_GREATER_THAN_INT(0, fogged);
+    TEST_ASSERT_GREATER_THAN_INT(0, textured);
+}
+
+void test_near_clipping_recomputes_fog_at_new_vertices(void) {
+    const KEK_FVec3 positions[3] = {{-1.f, -1.f, 0.05f}, {0.f, 1.f, 3.f}, {1.f, -1.f, 3.f}};
+    int i, painted = 0;
+    kek_3d_set_fog(&e, -1.f, camera.near_plane);
+    kek_3d_set_fog_color(&e, 77);
+    triangle(positions, 0, 0);
+    for (i = 0; i < e.w * e.h; ++i) {
+        if (e.db[i]) {
+            ++painted;
+            TEST_ASSERT_EQUAL_UINT8(77, e.fb[i]);
+        }
+    }
+    TEST_ASSERT_GREATER_THAN_INT(0, painted);
 }
 
 void test_public_projection_rejects_invalid_input_without_writing(void) {
@@ -166,9 +187,9 @@ void test_invalid_cameras_and_models_leave_frame_and_arena_unchanged(void) {
 
 void test_direct_rasterizers_reject_unbounded_screen_coordinates(void) {
     KEK_3D_ProjectedVertex v[3] = {
-        {{INT_MIN, 0}, 1.f, 1.f, 0.f, 0.f, 0.f},
-        {{INT_MAX, INT_MAX}, 1.f, 1.f, 0.f, 0.f, 0.f},
-        {{0, INT_MIN}, 1.f, 1.f, 0.f, 0.f, 0.f}};
+        {{INT_MIN, 0}, 1.f, 1.f, 0.f, 0.f, 0.f, 0.f},
+        {{INT_MAX, INT_MAX}, 1.f, 1.f, 0.f, 0.f, 0.f, 0.f},
+        {{0, INT_MIN}, 1.f, 1.f, 0.f, 0.f, 0.f, 0.f}};
     kek_3d_triangle(&e, v, 15);
     kek_3d_triangle_textured(&e, v, kek_texture_get(&e, kek_default_texture_handle(&e)));
     kek_3d_triangle_border(&e, v, 15, 15);
@@ -236,9 +257,9 @@ void test_side_clipping_interpolates_uvs_in_view_space(void) {
 
 void test_guard_band_boundary_and_degenerate_border(void) {
     KEK_3D_ProjectedVertex v[3] = {
-        {{-1048576, -1048576}, 1.f, 1.f, 0.f, 0.f, 0.f},
-        {{1048576, -1048576}, 1.f, 1.f, 0.f, 0.f, 0.f},
-        {{0, 1048576}, 1.f, 1.f, 0.f, 0.f, 0.f}};
+        {{-1048576, -1048576}, 1.f, 1.f, 0.f, 0.f, 0.f, 0.f},
+        {{1048576, -1048576}, 1.f, 1.f, 0.f, 0.f, 0.f, 0.f},
+        {{0, 1048576}, 1.f, 1.f, 0.f, 0.f, 0.f, 0.f}};
     kek_3d_triangle(&e, v, 15);
     TEST_ASSERT_EQUAL_INT(e.w * e.h, kek_test_frame_painted(&e));
     kek_flush_buffers(&e);
@@ -259,6 +280,7 @@ int main(void) {
     RUN_TEST(test_huge_triangle_clips_each_side_and_near_plane);
     RUN_TEST(test_huge_triangles_outside_each_side_draw_nothing);
     RUN_TEST(test_clipped_texture_and_fog_keep_their_attributes);
+    RUN_TEST(test_near_clipping_recomputes_fog_at_new_vertices);
     RUN_TEST(test_public_projection_rejects_invalid_input_without_writing);
     RUN_TEST(test_invalid_cameras_and_models_leave_frame_and_arena_unchanged);
     RUN_TEST(test_direct_rasterizers_reject_unbounded_screen_coordinates);

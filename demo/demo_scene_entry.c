@@ -14,6 +14,9 @@
 
 #define DEMO_MIRROR_Z 6.f
 #define DEMO_MIRROR_SIZE 128u
+#define DEMO_SKY_COLOR 77u
+#define DEMO_FOG_START 15.f
+#define DEMO_FOG_END 45.f
 
 static const KEK_FVec3 DEMO_MODEL_POSITION = { 1.5f, -1.f, 4.5f };
 static const KEK_FVec3 DEMO_MIRROR_POSITION = {-1.f, -0.5f, DEMO_MIRROR_Z};
@@ -135,8 +138,9 @@ void DEMO_EntryScene_enter(KEK_scene* scene, KEK_engine* e) {
     DEMO_EntryScene* s = (DEMO_EntryScene*)scene;
     DEMO_EntryScene_reset_(s);
     kek_texture_set_warp_mode(e, KEK_TEXTURE_WARP_CLAMP);
-    /* The cat sits 4.5 away; fog starts past it, so backing off shows it. */
-    kek_3d_set_fog(e, 6.f, 25.f);
+    /* Keep the nearby cat clear; distant geometry fades into the sky. */
+    kek_3d_set_fog(e, DEMO_FOG_START, DEMO_FOG_END);
+    kek_3d_set_fog_color(e, DEMO_SKY_COLOR);
 
     DEMO_EntryScene_load_assets_(s, e);
     DEMO_EntryScene_make_mirror_(s, e);
@@ -235,15 +239,16 @@ void DEMO_EntryScene_render(KEK_scene* scene, KEK_engine* e) {
     /* One turn every ten seconds, shared by the reflection and main view. */
     float rotate = 3.1415f * s->elapsed / 5.f;
 
+    kek_2d_rect(e, (KEK_IVec2){0, 0}, (KEK_IVec2){e->w, e->h}, DEMO_SKY_COLOR);
+
     if (mdl && mirror && s->camera.position.z < DEMO_MIRROR_Z - 0.1f
         && kek_target_bind(e, s->mirror_texture, KEK_TARGET_CLEAR_COLOR)) {
         reflected.position.z = 2.f * DEMO_MIRROR_Z - s->camera.position.z;
         reflected.rotation.y = 3.14159265f - s->camera.rotation.y;
         reflected.rotation.z = -s->camera.rotation.z;
-        /* The demo has no room geometry yet; a pale backing makes the dark
-           cat's silhouette legible in the reflected view. */
+        /* Match the reflection backdrop to the fog colour. */
         kek_2d_rect(e, (KEK_IVec2){0, 0},
-                    (KEK_IVec2){DEMO_MIRROR_SIZE - 1, DEMO_MIRROR_SIZE}, 8);
+                    (KEK_IVec2){DEMO_MIRROR_SIZE, DEMO_MIRROR_SIZE}, DEMO_SKY_COLOR);
         kek_3d_draw_model(e, mdl, &reflected, DEMO_MODEL_POSITION,
                           (KEK_FVec3){0.f, rotate, 0.f});
         kek_target_restore(e);

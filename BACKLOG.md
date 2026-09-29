@@ -285,11 +285,6 @@ separates them, at ~8 seconds a frame in float, and it is not a target (see Sett
   Nothing about it needs a `KEK_frame` type up front: `fb`, `db`, `w` and `h` are already the bound
   frame, and a bind/restore pair of functions over them is the whole API.
 
-- **Fog never reaches black.** The shading palette's last row is 1/`KEK_PALETTE_SHADING_LEVELS` of the
-  colour, not black, so a face past `fog_end` is dim but visible: at the default four levels, a quarter.
-  That is right for a light that only darkens, but wrong for fog into darkness. A black row after the
-  last one (or a fog colour, which costs one nearest-colour row per level) would fix it. It is a
-  palette-table change, not a rasteriser one.
 - **Nothing draws an image in 2D.** [kek_2d.h](kek/include/kek_2d.h) has primitives and 5×8 text but no way
   to put a `KEK_texture` into the framebuffer, which blocks HUD, menus, backgrounds, sprites and
   billboards. Needs `kek_2d_blit_texture()` and a transparent colour index.
@@ -483,6 +478,7 @@ on the hash has the reasoning, the measurements and what was verified.
 | --- | --- | --- |
 | Resolution hardcoded | `KEK_BUFFER_WIDTH`/`KEK_BUFFER_HEIGHT`/`KEK_TARGET_FPS` were `#define`s at the top of `kek.c`. In `kek_config.h` with the other knobs now, with CMake cache entries | `f99074d` |
 | No lighting | The shading palette was computed at init and `kek_3d_draw_model` never used it. Flat shading from a world-fixed directional light plus ambient, with the normal derived from the face; fog with view depth; Bayer 4×4 dither between rows | `424f69e` |
+| Fog stopped at a dim shade | Distance was added to the light shade, so distant faces stayed visible and dark faces faded sooner. Fog is now independent coverage toward a chosen palette index, dithered 4×4 and perspective-correct across large surfaces; light retains all its rows | current work |
 | Divides in the per-pixel loop | Three per pixel in `kek_3d_triangle` (`w0 / area`), five in `kek_3d_triangle_textured` (and `u_over_z / inv_z`), and no way to measure them. A benchmark in `bench/`; one divide per triangle, attributes as planes stepped by adds, and perspective divided out every 16 pixels with affine spans between, as in Quake. On an emulated 486DX2-66 (86Box, DJGPP): flat quad 791 → 445 ms, textured quad 1,681 → 1,242 ms, textured cube 478 → 346 ms | `954cb4c`, `0945961` |
 | Depth buffer the largest allocation | A `float` per pixel, 256,000 of a 320×200 block's 329,487 bytes. 1/z in a `uint16_t`, scaled so 65535 is the default near plane, saturating at both ends; the block is 201,487 | `6da6808` |
 | The sampler per textured pixel | `kek_texture_sample` was a call per pixel with a branch on the warp mode, `floorf` twice under `REPEAT` and two conversions. The span loop steps u and v in 16.16 and masks for wrap; only textures whose sides are not powers of two still go through it | `035fd37` |

@@ -5,6 +5,7 @@
 extern "C" {
 #endif
 
+#include <stdint.h>
 #include "kek_math.h"
 
 /* The light kek_3d_draw_model shades with: one directional light plus
@@ -22,10 +23,11 @@ typedef struct KEK_light {
     /* 0..1, the brightness of a face turned away from the light. 1 lights
        everything fully, which is how lighting is switched off. */
     float ambient;
-    /* View-space depths over which colours fall from full brightness to the
-       darkest shading level. Off unless fog_end > fog_start. */
+    /* View-space depths over which lit pixels give way to fog_color.
+       Off unless fog_end > fog_start. */
     float fog_start;
     float fog_end;
+    uint8_t fog_color; /* index in the current palette */
 } KEK_light;
 
 #ifdef __cplusplus

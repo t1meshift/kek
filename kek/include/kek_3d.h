@@ -47,6 +47,10 @@ typedef struct KEK_3D_ProjectedVertex {
        it to that range. kek_3d_draw_model fills it from the engine's light;
        anyone building vertices by hand sets 0 to draw unshaded. */
     float shade;
+    /* Fog coverage, independent of shade: 0 keeps the lit pixel, 1 uses the
+       engine's fog colour. It is interpolated with perspective correction
+       and clamped per pixel. Direct triangle callers set this explicitly. */
+    float fog;
 } KEK_3D_ProjectedVertex;
 
 KEK_FVec3 kek_3d_rotate(KEK_FVec3 p, KEK_FVec3 rotate);
@@ -58,7 +62,8 @@ KEK_FVec2 kek_3d_project(KEK_FVec3 p);
 KEK_FVec2 kek_3d_project_camera(KEK_FVec3 p, KEK_camera* camera, float aspect_ratio);
 /* Returns 0 without modifying out_vertex for an invalid camera, a point
    outside the depth range, or a non-finite/out-of-range projection.
-   The safe screen range is [-1048576, 1048576] on each axis. */
+   The safe screen range is [-1048576, 1048576] on each axis. A successful
+   projection sets shade and fog to zero; direct callers may then set them. */
 char kek_3d_project_vertex(KEK_engine* engine, KEK_camera* camera, KEK_FVec3 p, KEK_3D_ProjectedVertex *out_vertex);
 /* Direct triangle calls (including textured and border) reject screen
    coordinates outside [-1048576, 1048576] before integer edge arithmetic.
@@ -70,10 +75,13 @@ void kek_3d_blit_vertex(KEK_engine* engine, KEK_3D_ProjectedVertex vertex, uint8
 /* The light kek_3d_draw_model shades with — see KEK_light. direction is
    where the light travels, in world space, and is normalised here; a zero
    direction leaves only ambient. ambient is clamped to [0, 1], NaN to 0.
-   Fog runs from full brightness at view depth start to the darkest level at
-   end, and is off unless end > start. */
+   Fog replaces lit pixels with the palette index set by
+   kek_3d_set_fog_color, starting at view depth start and fully covering them
+   at end. Model fog is off unless end > start; direct triangle callers supply
+   coverage in each vertex. The default fog colour is palette index 0. */
 void kek_3d_set_light(KEK_engine* engine, KEK_FVec3 direction, float ambient);
 void kek_3d_set_fog(KEK_engine* engine, float start, float end);
+void kek_3d_set_fog_color(KEK_engine* engine, uint8_t color);
 /* Camera parameters must be finite, 0 < fov < 180, 0 < near < far.
    Invalid cameras/transforms and non-finite transformed vertices draw nothing.
    As before, far-plane rejection drops only faces wholly beyond far. */

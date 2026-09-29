@@ -37,6 +37,7 @@ static KEK_3D_ProjectedVertex vertex(int x, int y, float depth) {
     v.u_over_z = ((float)x / 64.f) * v.inv_z;
     v.v_over_z = ((float)y / 64.f) * v.inv_z;
     v.shade = 0.f;
+    v.fog = 0.f;
     return v;
 }
 
@@ -630,12 +631,13 @@ void test_a_shaded_texture_is_the_unshaded_one_through_the_shading_palette(void)
     kek_test_frame_assert_guards();
 }
 
-void test_fog_darkens_what_is_past_its_end_and_spares_what_is_before_its_start(void) {
+void test_fog_reaches_its_color_past_the_end_and_spares_what_is_before_the_start(void) {
     kek_3d_set_light(&e, (KEK_FVec3){ 0.f, 0.f, 1.f }, 1.f);
+    kek_3d_set_fog_color(&e, 77);
 
     kek_3d_set_fog(&e, 1.f, 2.f);
     draw_panel_facing_camera(5.f);
-    assert_painted_all(shaded(LEVELS - 1, WHITE));
+    assert_painted_all(77);
 
     kek_test_frame_clear(&e);
     kek_3d_set_fog(&e, 10.f, 20.f);
@@ -645,9 +647,148 @@ void test_fog_darkens_what_is_past_its_end_and_spares_what_is_before_its_start(v
 
 void test_fog_with_its_end_not_past_its_start_is_off(void) {
     kek_3d_set_light(&e, (KEK_FVec3){ 0.f, 0.f, 1.f }, 1.f);
+    kek_3d_set_fog_color(&e, 77);
     kek_3d_set_fog(&e, 2.f, 2.f);
     draw_panel_facing_camera(5.f);
     assert_painted_all(WHITE);
+}
+
+void test_fully_fogged_model_matches_the_background_but_keeps_depth(void) {
+    int painted = 0;
+    int i;
+    TEST_ASSERT_EQUAL_UINT8(0, e.light.fog_color);
+    kek_3d_set_fog_color(&e, 77);
+    kek_3d_set_fog(&e, 1.f, 2.f);
+    kek_3d_set_light(&e, (KEK_FVec3){0.f, 0.f, 1.f}, 1.f);
+    memset(e.fb, 77, (size_t)e.w * e.h);
+    draw_panel_facing_camera(3.f);
+    for (i = 0; i < e.w * e.h; ++i) {
+        TEST_ASSERT_EQUAL_UINT8(77, e.fb[i]);
+        painted += e.db[i] != 0;
+    }
+    TEST_ASSERT_GREATER_THAN_INT(0, painted);
+    kek_test_frame_assert_guards();
+}
+
+void test_fogged_triangle_still_occludes_far_geometry(void) {
+    KEK_3D_ProjectedVertex v[3] = {
+        vertex(40, 30, 2.f), vertex(140, 30, 2.f), vertex(40, 130, 2.f)
+    };
+    int i;
+    kek_3d_set_fog_color(&e, 77);
+    for (i = 0; i < 3; ++i) v[i].fog = 1.f;
+    kek_3d_triangle(&e, v, WHITE);
+    far_square(FAR_INK);
+    TEST_ASSERT_EQUAL_UINT8(77, kek_test_frame_pixel(&e, 50, 50));
+    TEST_ASSERT_EQUAL_UINT8(FAR_INK, kek_test_frame_pixel(&e, 120, 100));
+    kek_test_frame_assert_guards();
+}
+
+/* A constant half coverage uses eight pixels of every 4x4 tile, regardless
+   of how much light the face got. The other pixels retain that face's shade. */
+void test_fog_half_coverage_is_independent_of_light(void) {
+    int case_number;
+    int w = e.w, h = e.h;
+    kek_3d_set_fog_color(&e, 77);
+    for (case_number = 0; case_number < 2; ++case_number) {
+        int shade = case_number ? LEVELS - 1 : 0;
+        KEK_3D_ProjectedVertex v[3] = {
+            vertex_shaded(-10 * w, -10 * h, 3.f, (float)shade),
+            vertex_shaded(10 * w, -10 * h, 3.f, (float)shade),
+            vertex_shaded(w / 2, 10 * h, 3.f, (float)shade)
+        };
+        int i;
+        kek_test_frame_clear(&e);
+        for (i = 0; i < 3; ++i) v[i].fog = 0.5f;
+        kek_3d_triangle(&e, v, WHITE);
+        TEST_ASSERT_EQUAL_INT(w * h / 2, kek_test_frame_count(&e, 77));
+        TEST_ASSERT_EQUAL_INT(w * h / 2, kek_test_frame_count(&e, shaded(shade, WHITE)));
+    }
+    kek_test_frame_assert_guards();
+}
+
+/* Exercise the small affine triangle, wide perspective triangle and the
+   non-power-of-two sampled path with the same solid fog endpoint. */
+void test_textured_paths_reach_the_exact_fog_color(void) {
+    uint8_t texels2[4] = {WHITE, WHITE, WHITE, WHITE};
+    uint8_t texels3[9] = {WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE};
+    KEK_texture textures[2] = {{texels2, 2, 2}, {texels3, 3, 3}};
+    const int sizes[3] = {12, 120, 120};
+    int case_number;
+
+    kek_3d_set_fog_color(&e, 77);
+    for (case_number = 0; case_number < 3; ++case_number) {
+        int size = sizes[case_number];
+        KEK_3D_ProjectedVertex v[3] = {
+            vertex(20, 20, 3.f), vertex(20 + size, 20, 3.f), vertex(20, 20 + size, 3.f)
+        };
+        int i, painted = 0;
+        kek_test_frame_clear(&e);
+        for (i = 0; i < 3; ++i) v[i].fog = 1.f;
+        kek_3d_triangle_textured(&e, v, &textures[case_number == 2]);
+        for (i = 0; i < e.w * e.h; ++i) {
+            if (e.db[i]) {
+                ++painted;
+                TEST_ASSERT_EQUAL_UINT8(77, e.fb[i]);
+            }
+        }
+        TEST_ASSERT_GREATER_THAN_INT(0, painted);
+    }
+    kek_test_frame_assert_guards();
+}
+
+void test_textured_fog_and_light_match_a_flat_triangle(void) {
+    static uint8_t flat_frame[KEK_TEST_WIDTH * KEK_TEST_HEIGHT];
+    uint8_t texels2[4] = {WHITE, WHITE, WHITE, WHITE};
+    uint8_t texels3[9] = {WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE};
+    KEK_texture textures[2] = {{texels2, 2, 2}, {texels3, 3, 3}};
+    const int sizes[3] = {12, 120, 120};
+    int case_number;
+
+    kek_3d_set_fog_color(&e, 77);
+    for (case_number = 0; case_number < 3; ++case_number) {
+        int size = sizes[case_number];
+        KEK_3D_ProjectedVertex v[3] = {
+            vertex(20, 20, 3.f), vertex(20 + size, 20, 3.f), vertex(20, 20 + size, 3.f)
+        };
+        int i;
+        v[0].fog = 0.f; v[1].fog = 0.5f; v[2].fog = 1.f;
+        v[0].shade = 0.f; v[1].shade = 1.5f; v[2].shade = 3.f;
+        kek_test_frame_clear(&e);
+        kek_3d_triangle(&e, v, WHITE);
+        memcpy(flat_frame, e.fb, sizeof(flat_frame));
+        kek_test_frame_clear(&e);
+        kek_3d_triangle_textured(&e, v, &textures[case_number == 2]);
+        for (i = 0; i < e.w * e.h; ++i) {
+            TEST_ASSERT_EQUAL_UINT8(flat_frame[i], e.fb[i]);
+        }
+    }
+    kek_test_frame_assert_guards();
+}
+
+/* A large triangle with a distant corner must use view depth at the pixel.
+   Screen-linear coverage would fog (100, 60), although its depth is < 5. */
+void test_large_triangle_fog_follows_pixel_depth(void) {
+    uint8_t texels2[4] = {WHITE, WHITE, WHITE, WHITE};
+    uint8_t texels3[9] = {WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE};
+    KEK_texture textures[2] = {{texels2, 2, 2}, {texels3, 3, 3}};
+    int pass;
+    kek_3d_set_fog_color(&e, 77);
+    for (pass = 0; pass < 4; ++pass) {
+        int small = pass == 3;
+        KEK_3D_ProjectedVertex v[3] = {
+            vertex(20, 20, 2.f), vertex(small ? 44 : 300, 20, 20.f),
+            vertex(20, small ? 44 : 180, 2.f)
+        };
+        int i;
+        kek_test_frame_clear(&e);
+        for (i = 0; i < 3; ++i) v[i].fog = (v[i].depth - 5.f) / 5.f;
+        if (pass) kek_3d_triangle_textured(&e, v, &textures[pass == 2]);
+        else kek_3d_triangle(&e, v, WHITE);
+        TEST_ASSERT_EQUAL_UINT8(WHITE, kek_test_frame_pixel(&e, small ? 25 : 100, small ? 30 : 60));
+        TEST_ASSERT_EQUAL_UINT8(77, kek_test_frame_pixel(&e, small ? 42 : 290, 22));
+    }
+    kek_test_frame_assert_guards();
 }
 
 int main(void) {
@@ -679,8 +820,14 @@ int main(void) {
     RUN_TEST(test_half_a_level_dithers_half_the_pixels_to_the_next_row);
     RUN_TEST(test_a_shade_past_the_last_level_is_the_last_row);
     RUN_TEST(test_a_shaded_texture_is_the_unshaded_one_through_the_shading_palette);
-    RUN_TEST(test_fog_darkens_what_is_past_its_end_and_spares_what_is_before_its_start);
+    RUN_TEST(test_fog_reaches_its_color_past_the_end_and_spares_what_is_before_the_start);
     RUN_TEST(test_fog_with_its_end_not_past_its_start_is_off);
+    RUN_TEST(test_fully_fogged_model_matches_the_background_but_keeps_depth);
+    RUN_TEST(test_fogged_triangle_still_occludes_far_geometry);
+    RUN_TEST(test_fog_half_coverage_is_independent_of_light);
+    RUN_TEST(test_textured_paths_reach_the_exact_fog_color);
+    RUN_TEST(test_textured_fog_and_light_match_a_flat_triangle);
+    RUN_TEST(test_large_triangle_fog_follows_pixel_depth);
     RUN_TEST(test_a_model_too_big_to_transform_draws_nothing);
     return UNITY_END();
 }

@@ -60,6 +60,7 @@ static KEK_3D_ProjectedVertex vertex(int x, int y, float z, float u, float v, fl
     p.u_over_z = u / z;
     p.v_over_z = v / z;
     p.shade = shade;
+    p.fog = 0.f;
     return p;
 }
 
@@ -186,11 +187,11 @@ static void load_cat(const char* dir) {
 }
 
 /* The demo's view: the default camera, the cat turning in front of it, fog
-   from 6 to 25. */
+   from 15 to 45. */
 static void draw_cat(int frame, float z) {
     KEK_camera camera = KEK_DEFAULT_CAMERA;
 
-    kek_3d_set_fog(&e, 6.f, 25.f);
+    kek_3d_set_fog(&e, 15.f, 45.f);
     kek_3d_draw_model(&e, cat, &camera, (KEK_FVec3){ 0.f, -1.f, z },
                       (KEK_FVec3){ 0.f, (float)frame * 0.05f, 0.f });
     kek_3d_set_fog(&e, 0.f, 0.f);
@@ -208,7 +209,7 @@ static void scene_cat_behind(int frame) {
 static void scene_cat_offscreen(int frame) {
     KEK_camera camera = KEK_DEFAULT_CAMERA;
 
-    kek_3d_set_fog(&e, 6.f, 25.f);
+    kek_3d_set_fog(&e, 15.f, 45.f);
     kek_3d_draw_model(&e, cat, &camera, (KEK_FVec3){ 100.f, -1.f, 4.5f },
                       (KEK_FVec3){ 0.f, (float)frame * 0.05f, 0.f });
     kek_3d_set_fog(&e, 0.f, 0.f);
@@ -422,6 +423,8 @@ int main(int argc, char** argv) {
         (void)fprintf(stderr, "kek_init failed\n");
         return 1;
     }
+    /* A visible fog index keeps the painted-pixel count meaningful. */
+    kek_3d_set_fog_color(&e, 77);
     flat_cube = KEK_CUBE_MODEL;
     flat_cube.uvs = 0;
     flat_cube.face_uvs = 0;

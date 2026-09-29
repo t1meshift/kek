@@ -10,10 +10,12 @@
    instead of reading e->w shows. */
 
 #include <string.h>
+#include <math.h>
 #include "unity.h"
 #include "kek.h"
 #include "kek_2d.h"
 #include "kek_font.h"
+#include "kek_texture.h"
 #include "test_support.h"
 
 static KEK_engine e;
@@ -393,6 +395,206 @@ void test_text_off_every_edge_stays_in_the_frame(void) {
     }
 }
 
+void test_texture_blit_clips_and_skips_transparent_pixels(void) {
+    uint8_t pixels[] = {1, 0, 2, 3, 4, 0, 5, 6, 7, 8, 9, 10};
+    KEK_texture texture = {pixels, 4, 3};
+    size_t s;
+
+    for (s = 0; s < SIZE_COUNT; ++s) {
+        kek_test_frame_attach(&e, SIZES[s].w, SIZES[s].h);
+        memset(e.fb, 12, (size_t)e.w * e.h);
+        kek_2d_blit_texture(&e, &texture, at(-1, -1), 0);
+        TEST_ASSERT_EQUAL_UINT8(12, kek_test_frame_pixel(&e, 0, 0));
+        TEST_ASSERT_EQUAL_UINT8(5, kek_test_frame_pixel(&e, 1, 0));
+        TEST_ASSERT_EQUAL_UINT8(8, kek_test_frame_pixel(&e, 0, 1));
+        TEST_ASSERT_EQUAL_UINT8(12, kek_test_frame_pixel(&e, 3, 0));
+
+        kek_2d_blit_texture(&e, &texture, at(e.w - 2, e.h - 1), -1);
+        TEST_ASSERT_EQUAL_UINT8(1, kek_test_frame_pixel(&e, e.w - 2, e.h - 1));
+        TEST_ASSERT_EQUAL_UINT8(0, kek_test_frame_pixel(&e, e.w - 1, e.h - 1));
+        kek_2d_blit_texture(&e, &texture, at(e.w, 1), -1);
+        kek_2d_blit_texture(&e, &texture, at(-100, 1), -1);
+        kek_2d_blit_texture(&e, &texture, at(INT32_MAX, INT32_MAX), -1);
+        kek_2d_blit_texture(&e, &texture, at(INT32_MIN, INT32_MIN), -1);
+        kek_test_frame_assert_guards();
+    }
+}
+
+void test_texture_blit_leaves_depth_untouched(void) {
+    uint8_t pixels[] = {0, 7};
+    KEK_texture texture = {pixels, 2, 1};
+    size_t index = (size_t)4 * e.w + 3;
+
+    e.fb[index] = 9;
+    e.db[index] = 1234;
+    e.db[index + 1] = 5678;
+    kek_2d_blit_texture(&e, &texture, at(3, 4), 0);
+    TEST_ASSERT_EQUAL_UINT8(9, e.fb[index]);
+    TEST_ASSERT_EQUAL_UINT8(7, e.fb[index + 1]);
+    TEST_ASSERT_EQUAL_UINT16(1234, e.db[index]);
+    TEST_ASSERT_EQUAL_UINT16(5678, e.db[index + 1]);
+    kek_2d_blit_texture(&e, &texture, at(3, 4), -1);
+    TEST_ASSERT_EQUAL_UINT8(0, e.fb[index]);
+}
+
+void test_texture_region_blit_selects_atlas_cell_and_clips_both_sides(void) {
+    uint8_t pixels[] = {1, 0, 2, 3, 4, 0, 5, 6, 7, 8, 9, 10};
+    KEK_texture atlas = {pixels, 4, 3};
+    size_t s;
+
+    for (s = 0; s < SIZE_COUNT; ++s) {
+        kek_test_frame_attach(&e, SIZES[s].w, SIZES[s].h);
+        memset(e.fb, 12, (size_t)e.w * e.h);
+        kek_2d_blit_texture_region(&e, &atlas,
+            (KEK_IRect2){at(1, 0), at(2, 3)}, at(4, 3), 0);
+        TEST_ASSERT_EQUAL_UINT8(12, kek_test_frame_pixel(&e, 4, 3));
+        TEST_ASSERT_EQUAL_UINT8(2, kek_test_frame_pixel(&e, 5, 3));
+        TEST_ASSERT_EQUAL_UINT8(5, kek_test_frame_pixel(&e, 5, 4));
+        TEST_ASSERT_EQUAL_UINT8(8, kek_test_frame_pixel(&e, 4, 5));
+        TEST_ASSERT_EQUAL_UINT8(12, kek_test_frame_pixel(&e, 6, 3));
+
+        kek_2d_blit_texture_region(&e, &atlas,
+            (KEK_IRect2){at(-1, 0), at(3, 2)}, at(10, 2), -1);
+        TEST_ASSERT_EQUAL_UINT8(12, kek_test_frame_pixel(&e, 10, 2));
+        TEST_ASSERT_EQUAL_UINT8(1, kek_test_frame_pixel(&e, 11, 2));
+        TEST_ASSERT_EQUAL_UINT8(0, kek_test_frame_pixel(&e, 12, 2));
+
+        kek_2d_blit_texture_region(&e, &atlas,
+            (KEK_IRect2){at(3, 1), at(3, 2)}, at(e.w - 2, e.h - 2), -1);
+        TEST_ASSERT_EQUAL_UINT8(6, kek_test_frame_pixel(&e, e.w - 2, e.h - 2));
+        TEST_ASSERT_EQUAL_UINT8(12, kek_test_frame_pixel(&e, e.w - 1, e.h - 2));
+        TEST_ASSERT_EQUAL_UINT8(10, kek_test_frame_pixel(&e, e.w - 2, e.h - 1));
+
+        kek_2d_blit_texture_region(&e, &atlas,
+            (KEK_IRect2){at(1, 1), at(3, 2)}, at(-1, 7), -1);
+        TEST_ASSERT_EQUAL_UINT8(5, kek_test_frame_pixel(&e, 0, 7));
+        TEST_ASSERT_EQUAL_UINT8(6, kek_test_frame_pixel(&e, 1, 7));
+        TEST_ASSERT_EQUAL_UINT8(9, kek_test_frame_pixel(&e, 0, 8));
+
+        kek_2d_blit_texture_region(&e, &atlas,
+            (KEK_IRect2){at(INT32_MAX, 0), at(3, 2)}, at(0, 0), -1);
+        kek_2d_blit_texture_region(&e, &atlas,
+            (KEK_IRect2){at(0, 0), at(0, 2)}, at(0, 0), -1);
+        TEST_ASSERT_EQUAL_UINT8(12, kek_test_frame_pixel(&e, 0, 0));
+        kek_test_frame_assert_guards();
+    }
+}
+
+void test_transformed_blit_scales_mirrors_rotates_and_uses_pivot(void) {
+    uint8_t pixels[] = {1, 2, 3, 0};
+    KEK_texture texture = {pixels, 2, 2};
+    KEK_IRect2 full = { {0, 0}, {2, 2} };
+    KEK_2D_Transform t = { {10.f, 10.f}, {0.f, 0.f}, {1.5f, 1.5f}, 0.f };
+
+    kek_test_frame_attach(&e, 61, 37);
+    memset(e.fb, 12, (size_t)e.w * e.h);
+    kek_2d_blit_texture_region_transform(&e, &texture, full, t, 0);
+    TEST_ASSERT_EQUAL_UINT8(1, kek_test_frame_pixel(&e, 10, 10));
+    TEST_ASSERT_EQUAL_UINT8(2, kek_test_frame_pixel(&e, 11, 10));
+    TEST_ASSERT_EQUAL_UINT8(2, kek_test_frame_pixel(&e, 12, 10));
+    TEST_ASSERT_EQUAL_UINT8(3, kek_test_frame_pixel(&e, 10, 11));
+    TEST_ASSERT_EQUAL_UINT8(12, kek_test_frame_pixel(&e, 12, 12));
+    TEST_ASSERT_EQUAL_UINT8(12, kek_test_frame_pixel(&e, 13, 10));
+
+    t.position = (KEK_FVec2){20.f, 10.f};
+    t.scale = (KEK_FVec2){-1.f, 1.f};
+    kek_2d_blit_texture_region_transform(&e, &texture, full, t, -1);
+    TEST_ASSERT_EQUAL_UINT8(2, kek_test_frame_pixel(&e, 18, 10));
+    TEST_ASSERT_EQUAL_UINT8(1, kek_test_frame_pixel(&e, 19, 10));
+    TEST_ASSERT_EQUAL_UINT8(0, kek_test_frame_pixel(&e, 18, 11));
+
+    t.position = (KEK_FVec2){30.f, 10.f};
+    t.scale = (KEK_FVec2){1.f, 1.f};
+    t.rotation = 1.57079632679f;
+    kek_2d_blit_texture_region_transform(&e, &texture, full, t, -1);
+    TEST_ASSERT_EQUAL_UINT8(3, kek_test_frame_pixel(&e, 28, 10));
+    TEST_ASSERT_EQUAL_UINT8(1, kek_test_frame_pixel(&e, 29, 10));
+    TEST_ASSERT_EQUAL_UINT8(0, kek_test_frame_pixel(&e, 28, 11));
+    TEST_ASSERT_EQUAL_UINT8(2, kek_test_frame_pixel(&e, 29, 11));
+
+    t.position = (KEK_FVec2){40.f, 20.f};
+    t.pivot = (KEK_FVec2){1.f, 1.f};
+    t.rotation = 0.f;
+    kek_2d_blit_texture_region_transform(&e, &texture, full, t, -1);
+    TEST_ASSERT_EQUAL_UINT8(1, kek_test_frame_pixel(&e, 39, 19));
+    TEST_ASSERT_EQUAL_UINT8(0, kek_test_frame_pixel(&e, 40, 20));
+    kek_test_frame_assert_guards();
+}
+
+void test_transformed_atlas_blit_clips_and_preserves_depth(void) {
+    uint8_t pixels[] = {1, 2, 3, 4, 5, 6, 7, 8};
+    KEK_texture atlas = {pixels, 4, 2};
+    KEK_IRect2 frame = { {2, 0}, {2, 2} };
+    KEK_2D_Transform t = { {-1.f, -1.f}, {0.f, 0.f}, {2.f, 2.f}, 0.f };
+    size_t s;
+
+    for (s = 0; s < SIZE_COUNT; ++s) {
+        kek_test_frame_attach(&e, SIZES[s].w, SIZES[s].h);
+        memset(e.fb, 12, (size_t)e.w * e.h);
+        e.db[0] = 1234;
+        kek_2d_blit_texture_region_transform(&e, &atlas, frame, t, -1);
+        TEST_ASSERT_EQUAL_UINT8(3, kek_test_frame_pixel(&e, 0, 0));
+        TEST_ASSERT_EQUAL_UINT8(4, kek_test_frame_pixel(&e, 1, 0));
+        TEST_ASSERT_EQUAL_UINT8(7, kek_test_frame_pixel(&e, 0, 1));
+        TEST_ASSERT_EQUAL_UINT16(1234, e.db[0]);
+
+        frame.origin.x = 3;
+        t.position = (KEK_FVec2){10.f, 10.f};
+        t.pivot = (KEK_FVec2){0.f, 0.f};
+        t.scale = (KEK_FVec2){1.5f, 1.5f};
+        kek_2d_blit_texture_region_transform(&e, &atlas, frame, t, -1);
+        TEST_ASSERT_EQUAL_UINT8(4, kek_test_frame_pixel(&e, 10, 10));
+        TEST_ASSERT_EQUAL_UINT8(12, kek_test_frame_pixel(&e, 12, 10));
+        kek_test_frame_assert_guards();
+        frame.origin.x = 2;
+        t = (KEK_2D_Transform){ {-1.f, -1.f}, {0.f, 0.f}, {2.f, 2.f}, 0.f };
+    }
+}
+
+void test_transformed_identity_matches_region_blit_and_invalid_inputs_draw_nothing(void) {
+    uint8_t pixels[] = {1, 0, 2, 3, 4, 5};
+    KEK_texture texture = {pixels, 3, 2};
+    KEK_IRect2 frame = { {-1, 0}, {4, 2} };
+    KEK_2D_Transform t = { {5.f, 7.f}, {1.f, 2.f}, {1.f, 1.f}, 0.f };
+    uint8_t reference[61 * 37];
+
+    kek_test_frame_attach(&e, 61, 37);
+    memset(e.fb, 12, (size_t)e.w * e.h);
+    kek_2d_blit_texture_region(&e, &texture, frame, at(4, 5), 0);
+    memcpy(reference, e.fb, sizeof(reference));
+    memset(e.fb, 12, (size_t)e.w * e.h);
+    kek_2d_blit_texture_region_transform(&e, &texture, frame, t, 0);
+    TEST_ASSERT_EQUAL_MEMORY(reference, e.fb, sizeof(reference));
+
+    t.scale.x = 0.f;
+    kek_2d_blit_texture_region_transform(&e, &texture, frame, t, -1);
+    t.scale.x = NAN;
+    kek_2d_blit_texture_region_transform(&e, &texture, frame, t, -1);
+    t.scale.x = 1.f;
+    t.rotation = INFINITY;
+    kek_2d_blit_texture_region_transform(&e, &texture, frame, t, -1);
+    TEST_ASSERT_EQUAL_MEMORY(reference, e.fb, sizeof(reference));
+    kek_test_frame_assert_guards();
+}
+
+void test_whole_texture_transform_matches_full_region(void) {
+    uint8_t pixels[] = {1, 0, 2, 3, 4, 5};
+    KEK_texture texture = {pixels, 3, 2};
+    KEK_2D_Transform t = { {12.f, 9.f}, {1.5f, 1.f}, {2.f, 1.5f}, 0.4f };
+    uint8_t reference[61 * 37];
+
+    kek_test_frame_attach(&e, 61, 37);
+    memset(e.fb, 12, (size_t)e.w * e.h);
+    kek_2d_blit_texture_region_transform(&e, &texture,
+        (KEK_IRect2){{0, 0}, {3, 2}}, t, 0);
+    memcpy(reference, e.fb, sizeof(reference));
+    memset(e.fb, 12, (size_t)e.w * e.h);
+    kek_2d_blit_texture_transform(&e, &texture, t, 0);
+    kek_2d_blit_texture_transform(&e, NULL, t, 0);
+    TEST_ASSERT_EQUAL_MEMORY(reference, e.fb, sizeof(reference));
+    kek_test_frame_assert_guards();
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_rect_fills_the_same_pixels_whichever_way_its_corners_come);
@@ -411,5 +613,12 @@ int main(void) {
     RUN_TEST(test_degenerate_triangles_stay_in_the_frame);
     RUN_TEST(test_a_triangle_larger_than_the_frame_fills_it);
     RUN_TEST(test_text_off_every_edge_stays_in_the_frame);
+    RUN_TEST(test_texture_blit_clips_and_skips_transparent_pixels);
+    RUN_TEST(test_texture_blit_leaves_depth_untouched);
+    RUN_TEST(test_texture_region_blit_selects_atlas_cell_and_clips_both_sides);
+    RUN_TEST(test_transformed_blit_scales_mirrors_rotates_and_uses_pivot);
+    RUN_TEST(test_transformed_atlas_blit_clips_and_preserves_depth);
+    RUN_TEST(test_transformed_identity_matches_region_blit_and_invalid_inputs_draw_nothing);
+    RUN_TEST(test_whole_texture_transform_matches_full_region);
     return UNITY_END();
 }

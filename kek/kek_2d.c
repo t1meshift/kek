@@ -1,11 +1,180 @@
 #include <stdlib.h>
 #include <math.h>
+#include <float.h>
+#include <limits.h>
+#include <stdint.h>
+#include <string.h>
 #include "include/kek_math.h"
 #include "kek_macro.h"
 #include "kek_2d.h"
 #include "kek_font.h"
 #include "kek.h"
 #include "kek_internal.h"
+
+void kek_2d_blit_texture_region(KEK_engine* engine, const KEK_texture* texture,
+                                KEK_IRect2 source, KEK_IVec2 dest, int transparent_index) {
+    int64_t left, top, right, bottom;
+    int64_t y;
+    size_t count;
+
+    if (!engine || !texture || !texture->data || !texture->width || !texture->height
+        || !engine->fb || texture->data == engine->fb
+        || source.size.x <= 0 || source.size.y <= 0
+        || transparent_index < -1 || transparent_index > 255) {
+        return;
+    }
+
+    /* Clip in destination space. Each bound clips the source and destination
+       by the same number of pixels, preserving their one-to-one mapping. */
+    left = dest.x;
+    top = dest.y;
+    right = (int64_t)dest.x + source.size.x;
+    bottom = (int64_t)dest.y + source.size.y;
+    if (left < 0) left = 0;
+    if (top < 0) top = 0;
+    if (left < (int64_t)dest.x - source.origin.x)
+        left = (int64_t)dest.x - source.origin.x;
+    if (top < (int64_t)dest.y - source.origin.y)
+        top = (int64_t)dest.y - source.origin.y;
+    if (right > engine->w) right = engine->w;
+    if (bottom > engine->h) bottom = engine->h;
+    if (right > (int64_t)dest.x + texture->width - source.origin.x)
+        right = (int64_t)dest.x + texture->width - source.origin.x;
+    if (bottom > (int64_t)dest.y + texture->height - source.origin.y)
+        bottom = (int64_t)dest.y + texture->height - source.origin.y;
+    if (left >= right || top >= bottom) return;
+
+    count = (size_t)(right - left);
+    for (y = top; y < bottom; ++y) {
+        size_t x;
+        const uint8_t* src = texture->data
+            + (size_t)((int64_t)source.origin.y + y - dest.y) * texture->width
+            + (size_t)((int64_t)source.origin.x + left - dest.x);
+        uint8_t* dst = engine->fb + (size_t)y * engine->w + (size_t)left;
+        if (transparent_index == -1) {
+            memcpy(dst, src, count);
+        } else {
+            for (x = 0; x < count; ++x) {
+                if (src[x] != (uint8_t)transparent_index) dst[x] = src[x];
+            }
+        }
+    }
+}
+
+void kek_2d_blit_texture(KEK_engine* engine, const KEK_texture* texture,
+                         KEK_IVec2 dest, int transparent_index) {
+    KEK_IRect2 source;
+    if (!texture) return;
+    source.origin = (KEK_IVec2){0, 0};
+    source.size = (KEK_IVec2){texture->width, texture->height};
+    kek_2d_blit_texture_region(engine, texture, source, dest, transparent_index);
+}
+
+void kek_2d_blit_texture_region_transform(KEK_engine* engine, const KEK_texture* texture,
+                                          KEK_IRect2 source, KEK_2D_Transform transform,
+                                          int transparent_index) {
+    int64_t u0, v0, u1, v1;
+    double c, s, min_x, min_y, max_x, max_y;
+    double du_dx, du_dy, dv_dx, dv_dy;
+    double row_u, row_v;
+    int x0, y0, x1, y1, x, y, i;
+
+    if (!engine || !texture || !texture->data || !texture->width || !texture->height
+        || !engine->fb || texture->data == engine->fb
+        || source.size.x <= 0 || source.size.y <= 0
+        || transparent_index < -1 || transparent_index > 255
+        || !(fabsf(transform.position.x) <= FLT_MAX && fabsf(transform.position.y) <= FLT_MAX
+             && fabsf(transform.pivot.x) <= FLT_MAX && fabsf(transform.pivot.y) <= FLT_MAX
+             && fabsf(transform.scale.x) <= FLT_MAX && fabsf(transform.scale.y) <= FLT_MAX
+             && fabsf(transform.rotation) <= FLT_MAX)
+        || transform.scale.x == 0.f || transform.scale.y == 0.f) {
+        return;
+    }
+
+    if (transform.rotation == 0.f && transform.scale.x == 1.f && transform.scale.y == 1.f) {
+        double dx = (double)transform.position.x - transform.pivot.x;
+        double dy = (double)transform.position.y - transform.pivot.y;
+        if (dx >= INT_MIN && dx <= INT_MAX && dy >= INT_MIN && dy <= INT_MAX
+            && dx == (int)dx && dy == (int)dy) {
+            kek_2d_blit_texture_region(engine, texture, source,
+                                       (KEK_IVec2){(int)dx, (int)dy}, transparent_index);
+            return;
+        }
+    }
+
+    /* Source clipping is expressed in local rectangle coordinates, so it
+       does not move the pivot when a rectangle hangs outside the texture. */
+    u0 = source.origin.x < 0 ? -(int64_t)source.origin.x : 0;
+    v0 = source.origin.y < 0 ? -(int64_t)source.origin.y : 0;
+    u1 = source.size.x;
+    v1 = source.size.y;
+    if (u1 > (int64_t)texture->width - source.origin.x)
+        u1 = (int64_t)texture->width - source.origin.x;
+    if (v1 > (int64_t)texture->height - source.origin.y)
+        v1 = (int64_t)texture->height - source.origin.y;
+    if (u0 >= u1 || v0 >= v1) return;
+
+    c = cosf(transform.rotation);
+    s = sinf(transform.rotation);
+    if (!(fabs(c) <= DBL_MAX && fabs(s) <= DBL_MAX)) return;
+    du_dx = c / transform.scale.x;
+    du_dy = s / transform.scale.x;
+    dv_dx = -s / transform.scale.y;
+    dv_dy = c / transform.scale.y;
+
+    min_x = min_y = DBL_MAX;
+    max_x = max_y = -DBL_MAX;
+    for (i = 0; i < 4; ++i) {
+        double u = (double)((i & 1) ? u1 : u0) - transform.pivot.x;
+        double v = (double)((i & 2) ? v1 : v0) - transform.pivot.y;
+        double sx = transform.position.x + u * transform.scale.x * c - v * transform.scale.y * s;
+        double sy = transform.position.y + u * transform.scale.x * s + v * transform.scale.y * c;
+        if (sx < min_x) min_x = sx;
+        if (sx > max_x) max_x = sx;
+        if (sy < min_y) min_y = sy;
+        if (sy > max_y) max_y = sy;
+    }
+    if (max_x <= 0. || max_y <= 0. || min_x >= engine->w || min_y >= engine->h) return;
+    if (min_x < 0.) min_x = 0.;
+    if (min_y < 0.) min_y = 0.;
+    if (max_x > engine->w) max_x = engine->w;
+    if (max_y > engine->h) max_y = engine->h;
+    x0 = (int)floor(min_x);
+    y0 = (int)floor(min_y);
+    x1 = (int)ceil(max_x);
+    y1 = (int)ceil(max_y);
+
+    row_u = transform.pivot.x + du_dx * (x0 + 0.5 - transform.position.x)
+                                + du_dy * (y0 + 0.5 - transform.position.y);
+    row_v = transform.pivot.y + dv_dx * (x0 + 0.5 - transform.position.x)
+                                + dv_dy * (y0 + 0.5 - transform.position.y);
+    for (y = y0; y < y1; ++y) {
+        double u = row_u, v = row_v;
+        uint8_t* dst = engine->fb + (size_t)y * engine->w;
+        for (x = x0; x < x1; ++x) {
+            if (u >= u0 && u < u1 && v >= v0 && v < v1) {
+                size_t sx = (size_t)((int64_t)source.origin.x + (int64_t)u);
+                size_t sy = (size_t)((int64_t)source.origin.y + (int64_t)v);
+                uint8_t pixel = texture->data[sy * texture->width + sx];
+                if (transparent_index == -1 || pixel != (uint8_t)transparent_index)
+                    dst[x] = pixel;
+            }
+            u += du_dx;
+            v += dv_dx;
+        }
+        row_u += du_dy;
+        row_v += dv_dy;
+    }
+}
+
+void kek_2d_blit_texture_transform(KEK_engine* engine, const KEK_texture* texture,
+                                   KEK_2D_Transform transform, int transparent_index) {
+    KEK_IRect2 source;
+    if (!texture) return;
+    source.origin = (KEK_IVec2){0, 0};
+    source.size = (KEK_IVec2){texture->width, texture->height};
+    kek_2d_blit_texture_region_transform(engine, texture, source, transform, transparent_index);
+}
 
 
 char kek_2d_clip_line(KEK_IVec2 *p0, KEK_IVec2 *p1, KEK_IRect2 v) {

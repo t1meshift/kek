@@ -65,6 +65,26 @@ void test_2d_and_3d_draw_into_the_texture_and_restore_the_main_frame(void) {
     TEST_ASSERT_EQUAL_size_t(available, kek_arena_available(&e));
 }
 
+void test_blit_texture_into_bound_target(void) {
+    uint8_t pixels[] = {0, 3, 4, 5};
+    KEK_texture source = {pixels, 2, 2};
+    KEK_TextureHandle handle = kek_texture_create(&e, 5, 4);
+    KEK_texture* target = kek_texture_get(&e, handle);
+
+    TEST_ASSERT_NOT_NULL(target);
+    TEST_ASSERT_TRUE(kek_target_bind(&e, handle, KEK_TARGET_CLEAR_COLOR));
+    kek_2d_blit_texture(&e, &source, (KEK_IVec2){4, 2}, 0);
+    TEST_ASSERT_EQUAL_UINT8(0, target->data[2 * 5 + 4]);
+    TEST_ASSERT_EQUAL_UINT8(4, target->data[3 * 5 + 4]);
+    kek_2d_blit_texture_region_transform(&e, &source,
+        (KEK_IRect2){{0, 0}, {2, 2}},
+        (KEK_2D_Transform){{2.f, 1.f}, {0.f, 0.f}, {1.5f, 1.5f}, 0.f}, 0);
+    TEST_ASSERT_EQUAL_UINT8(3, target->data[1 * 5 + 3]);
+    TEST_ASSERT_EQUAL_UINT8(4, target->data[2 * 5 + 2]);
+    kek_target_restore(&e);
+    TEST_ASSERT_EQUAL_UINT8(5, target->data[3 * 5 + 4]);
+}
+
 void test_colour_can_survive_a_bind_but_depth_starts_clear_each_time(void) {
     KEK_TextureHandle handle = kek_texture_create(&e, 20, 20);
     KEK_texture* texture = kek_texture_get(&e, handle);
@@ -196,6 +216,7 @@ void test_render_recovers_the_main_frame_if_a_scene_forgets_restore(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_2d_and_3d_draw_into_the_texture_and_restore_the_main_frame);
+    RUN_TEST(test_blit_texture_into_bound_target);
     RUN_TEST(test_colour_can_survive_a_bind_but_depth_starts_clear_each_time);
     RUN_TEST(test_invalid_and_second_bind_leave_the_active_view_untouched);
     RUN_TEST(test_active_texture_cannot_be_destroyed_or_released);

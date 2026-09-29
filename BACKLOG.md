@@ -1,7 +1,7 @@
 # Backlog
 
 What is missing, why it matters and in what order to do it. Tiers are priorities,
-not schedules: Tier 0 is the current focus, everything below it is ordered by what
+not schedules: Tier 3 is the current focus, everything below it is ordered by what
 unblocks what. Items marked `needs a decision` are waiting on a call, not on work.
 Finished items move to [Done](#done) at the bottom, one line each plus the commit
 that did it — the reasoning lives in the commit message rather than twice here.
@@ -27,7 +27,7 @@ These shape several items below, so they are recorded once here.
 
 ## Tier 0 — Foundation
 
-Nothing open. Tier 2 is next.
+Nothing open. Tier 3 is next.
 
 ## Tier 1 — The engine as a library
 
@@ -35,6 +35,10 @@ Nothing open. The library builds alone, installs as a package the demo builds ag
 keeps no storage of its own: everything is in the block the application hands `kek_init`.
 
 ## Tier 2 — Target machine: Pentium, running on a 486DX
+
+Complete for the current performance target. The demo cat and a 300-triangle room fit the
+Pentium 100 budget. Further low-level tuning is exploratory and lives in Tier 7; larger
+levels need visibility work in Tier 4 before their render cost is worth tuning.
 
 Budget: fit comfortably into ~4 MB including assets. The worst-case pools are gone (`16ffe9d`) and
 depth is 16 bits (`6da6808`): a 320×200 engine is a block of `KEK_MEMORY_SIZE(320, 200)` = 202,527
@@ -230,8 +234,7 @@ too. With the camera moved up so that the cat fills most of the frame, the paced
   An earlier comparison of separate executables showed noisy broad regressions and was discarded;
   matching the binary and code layout was necessary to make this result credible. A direct
   constant-`du`/`dv` span step was slower by ~1.8%, and forcing the affine span handler `noinline`
-  was slower by ~6.3%; neither was kept. The one-pixel path is in the working source, not yet
-  committed.
+  was slower by ~6.3%; neither was kept. The one-pixel path is committed as `0936612`.
 
 Geometry is small beside that, and float suits it. A second standalone loop — rotate, translate and
 project a vertex; set up a triangle's area and three attribute gradients — in cycles:
@@ -249,11 +252,11 @@ against ~9 on the 486DX: a millisecond either way, in frames of 40 and 130. The 
 beats its 10-cycle unpipelined `imul`, which is why Quake kept geometry in float. Only the 486SX
 separates them, at ~8 seconds a frame in float, and it is not a target (see Settled decisions).
 
-- **What is left between the textured span and the table.** ~49 cycles a pixel on the Pentium against
+- **Measured gap between the textured span and the table.** ~49 cycles a pixel on the Pentium against
   38 for the standalone loop with the same dither. `f50ba29` took the span ends' conversions off x87's
   `fldcw` (a double's mantissa rounds them instead), the variable shift out of the texel index and the
   reloads out of the loop: from ~57. Measured on the Pentium only; timings there are `uclock()` now
-  (`50fc42e`). What might take the rest:
+  (`50fc42e`). Ideas deferred to Tier 7 for the rest:
   - *The span loop itself* is still ~35 instructions a pixel with most of its variables on the stack:
     x86-32 has seven registers, DJGPP's GCC keeps one for the frame pointer, and the loop wants more
     than a dozen. The standalone loop has its texture's size as a constant; the engine's is a mask in
@@ -266,28 +269,20 @@ separates them, at ~8 seconds a frame in float, and it is not a target (see Sett
     3–4% on the cubes, not taken. It needs `-fno-math-errno` in every build of the library, or
     `lrintf` is a libm call slower than the cast; and it rounds vertices to the nearest pixel, which
     moves edges. The double-mantissa rounding the span ends use would do the same without a flag.
-- **Order of work.** Done: the arena for Tier 1, the per-pixel divides (`0945961`), 16-bit depth
+- **Work completed.** The arena for Tier 1, the per-pixel divides (`0945961`), 16-bit depth
   (`6da6808`), the scanline rasteriser (`035fd37`), the models' storage (`fb92a44`) and the per-face
-  and per-triangle waste (`5269d9e`) and the affine path for small triangles (`62981cb`). Next the
-  vertices and faces, which are now the biggest part of the demo's frame. What is left of the span matters for large surfaces: a full-screen textured wall
-  is 33 ms on the Pentium, where the table's loop would be ~26 ms. Fixed point across the engine is no
-  longer on the list (see Settled decisions).
+  and per-triangle waste (`5269d9e`), the affine path for small triangles (`62981cb`), model
+  frustum culling (`f948516`) and the one-pixel affine span (`0936612`). On the Pentium 100,
+  the current DOS Release `-O3` benchmark (100 frames, best of five rounds, no VGA copy) takes
+  19.126 ms for the demo cat, 32.382 ms close up, 43.669 ms for the 300-triangle room and
+  82.271 ms for the 2,700-triangle room. A hidden second room adds 4.439 ms to the small
+  room. These numbers make level visibility the next useful performance task, alongside
+  building levels themselves. Further vertex, face and span tuning is deferred to Tier 7;
+  a full-screen textured wall still has a measured gap to the standalone span loop. Fixed
+  point across the engine is no longer on the list (see Settled decisions).
 
 ## Tier 3 — Engine: prerequisites for levels
 
-- **Render to texture.** The arena it waited for is in. A `KEK_texture` is palette indices, a byte per pixel, the
-  same as the frame, so binding a texture's pixels as the frame for a while and drawing into it with
-  the ordinary 2D and 3D calls gives security-camera monitors (the Build engine's `setviewtotile`) and
-  model thumbnails in the editor. The projection already takes its aspect from `e->w`/`e->h`. Two
-  things to get right: 3D needs a depth buffer the size of the texture, which should be a temporary
-  from the top of the arena (`kek_arena_temp`, internal today) rather than the frame's own, since a scene half way through its main view has that
-  one half full; and textures are drawn before the view that shows them, or they show the last frame.
-  Nothing about it needs a `KEK_frame` type up front: `fb`, `db`, `w` and `h` are already the bound
-  frame, and a bind/restore pair of functions over them is the whole API.
-
-- **Nothing draws an image in 2D.** [kek_2d.h](kek/include/kek_2d.h) has primitives and 5×8 text but no way
-  to put a `KEK_texture` into the framebuffer, which blocks HUD, menus, backgrounds, sprites and
-  billboards. Needs `kek_2d_blit_texture()` and a transparent colour index.
 - **No scale, no transform type.** `kek_3d_draw_model(e, mdl, camera, pos, rotation)`
   ([kek_3d.h](kek/include/kek_3d.h)) — required before anything can be placed in a world.
 - **The camera is set up again for every model.** `kek_3d_draw_model` builds the camera's matrix
@@ -342,6 +337,22 @@ rendering is a single hardcoded `kek_3d_draw_model` call.
 
 - An entity/instance concept in the engine: a pooled array of `{model handle, texture handle, transform,
   flags}` and a draw pass over it, following the existing `KEK_ModelPool` pattern.
+- **No model animation.** `KEK_model` has one vertex array and KMF v1 stores one pose;
+  `kek_3d_draw_model` only rotates and places that static mesh. Characters need multiple named
+  clips over a shared set of MDL-style vertex frames and one set of faces and UVs: at least a
+  looping walk and one-shot death, with attacks and idle as needed. A clip needs its frame range,
+  rate and playback mode; an instance selects a clip and tracks its time independently of other
+  instances. Death can hold its last frame, while an attack can return to idle or walk when it
+  finishes. Try frame selection first; interpolation between sparse keyframes is optional if its
+  look and CPU cost justify it. No skeletal animation. Independently transformed rigid parts
+  are another option for models with visible joints. Plan for roughly 4–8 named attachment
+  points per animated model: each frame gives their position and orientation, so an instance
+  can equip separate weapons, a head or props without storing those vertices in every parent
+  frame. Slots need not all have a visible child; each drawn child adds a model draw. Decide
+  frame packing, clip metadata and the exact attachment limit with a real animated asset before
+  changing KMF or the draw API. Keep attached children in the instance too. Initially all frames
+  of a loaded model stay in the application's arena, shared by its instances; add an evicting
+  model cache only if real level assets show that it is needed.
 - The `.klf` format, magic `KLVL`: header, model table (paths), instance table (transform plus model
   index), camera spawn, and the light: per-vertex shade for level geometry, a light per zone, fog. Same
   discipline as KMF — fixed-size records, bounds-checked, no allocation. Level geometry wants more
@@ -391,6 +402,14 @@ and camera coordinates ([demo_scene_entry.c](demo/demo_scene_entry.c)).
   [demo_scene_entry.c#L69](demo/demo_scene_entry.c#L69) and the commented-out multi-model draw.
 
 ## Tier 7 — Later
+
+- **Further performance tuning.** Reprofile after level visibility is in place. The Tier 2
+  measurements above identify remaining vertex, face, triangle/row setup and textured-span
+  costs, but none is currently a blocker for the demo target. Keep image quality and whole-scene
+  FPS in the comparison before taking another low-level optimization. Checkerboard rasterization
+  is an optional experiment for distant, pixel-heavy surfaces: it could skip half their pixel
+  work, but not triangle or row setup. Compare it with lower-resolution rendering, including
+  reconstruction cost and artifacts on moving edges at 320×200, before considering it for the engine.
 
 - **No audio at all**; `SDL_AUDIO` is explicitly disabled in the web build
   ([CMakeLists.txt](CMakeLists.txt)). Own format by analogy with KMF/KIF, most likely sound banks — a set
@@ -478,7 +497,9 @@ on the hash has the reasoning, the measurements and what was verified.
 | --- | --- | --- |
 | Resolution hardcoded | `KEK_BUFFER_WIDTH`/`KEK_BUFFER_HEIGHT`/`KEK_TARGET_FPS` were `#define`s at the top of `kek.c`. In `kek_config.h` with the other knobs now, with CMake cache entries | `f99074d` |
 | No lighting | The shading palette was computed at init and `kek_3d_draw_model` never used it. Flat shading from a world-fixed directional light plus ambient, with the normal derived from the face; fog with view depth; Bayer 4×4 dither between rows | `424f69e` |
-| Fog stopped at a dim shade | Distance was added to the light shade, so distant faces stayed visible and dark faces faded sooner. Fog is now independent coverage toward a chosen palette index, dithered 4×4 and perspective-correct across large surfaces; light retains all its rows | current work |
+| Render to texture | A bound `KEK_texture` uses its pixels as the frame, a temporary depth buffer, and the texture's dimensions; bind/restore preserves the main view. The mirror demo draws the reflected scene into a texture | `2286811` |
+| Fog stopped at a dim shade | Distance was added to the light shade, so distant faces stayed visible and dark faces faded sooner. Fog is now independent coverage toward a chosen palette index, dithered 4×4 and perspective-correct across large surfaces; light retains all its rows | `92b84f3` |
+| No 2D image drawing | Region blits and transformed blits copy palette indices from textures, with clipping and an optional transparent index. They also work with a bound render target | `e470902` |
 | Divides in the per-pixel loop | Three per pixel in `kek_3d_triangle` (`w0 / area`), five in `kek_3d_triangle_textured` (and `u_over_z / inv_z`), and no way to measure them. A benchmark in `bench/`; one divide per triangle, attributes as planes stepped by adds, and perspective divided out every 16 pixels with affine spans between, as in Quake. On an emulated 486DX2-66 (86Box, DJGPP): flat quad 791 → 445 ms, textured quad 1,681 → 1,242 ms, textured cube 478 → 346 ms | `954cb4c`, `0945961` |
 | Depth buffer the largest allocation | A `float` per pixel, 256,000 of a 320×200 block's 329,487 bytes. 1/z in a `uint16_t`, scaled so 65535 is the default near plane, saturating at both ends; the block is 201,487 | `6da6808` |
 | The sampler per textured pixel | `kek_texture_sample` was a call per pixel with a branch on the warp mode, `floorf` twice under `REPEAT` and two conversions. The span loop steps u and v in 16.16 and masks for wrap; only textures whose sides are not powers of two still go through it | `035fd37` |

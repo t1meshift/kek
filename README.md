@@ -15,7 +15,7 @@ The library is the product; everything else consumes it.
 
 ## Roadmap
 
-The engine targets a Pentium and should still run on a 486DX, which settles a few things: float for geometry and integers in the pixel loop, as Quake did, and an FPU is required. The current focus is the foundation rather than features. Warnings, clang-tidy, a native CI build and a unit-test suite are in place, and the defects they turned up are fixed. Models are lit: flat shading through the palette, with fog and a dither. Levels and a working editor come after the rest of the foundation.
+The engine targets a Pentium and should still run on a 486DX, which settles a few things: float for geometry and integers in the pixel loop, as Quake did, and an FPU is required. The foundation and the current target-machine performance work are complete. Warnings, clang-tidy, a native CI build and a unit-test suite are in place, and the defects they turned up are fixed. Models are lit: flat shading through the palette, with fog and a dither. The current focus is the engine work needed for levels; levels and a working editor follow.
 
 [BACKLOG.md](BACKLOG.md) has the whole list, ordered by what unblocks what.
 

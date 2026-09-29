@@ -42,6 +42,15 @@ struct KEK_engine {
     uint16_t* db; /** depth buffer: 1/z, quantised — see KEK_3D_DEPTH_SCALE */
     uint16_t w; /** buffer width */
     uint16_t h; /** buffer height */
+    /* One temporary render target may replace the bound frame. These fields
+       keep the interrupted view intact until kek_target_restore. */
+    uint8_t* target_saved_fb;
+    uint16_t* target_saved_db;
+    uint16_t target_saved_w;
+    uint16_t target_saved_h;
+    size_t target_temp_mark;
+    KEK_TextureHandle target_handle;
+    uint8_t target_active;
     uint16_t target_fps;
     /* The rest of the block: the pools' tables and everything in them. */
     KEK_arena arena;
@@ -123,6 +132,18 @@ void kek_set_scene(KEK_engine* engine, KEK_scene* scene);
 void kek_request_scene(KEK_engine* engine, KEK_scene* scene);
 
 void kek_flush_buffers(KEK_engine* engine);
+
+/* Bind an engine-owned texture as the current 2D/3D frame. The colour pixels
+   survive by default; KEK_TARGET_CLEAR_COLOR clears them to palette index 0.
+   Depth always starts clear in a temporary arena allocation. Returns 0 and
+   changes nothing for an invalid/empty texture, insufficient arena, unknown
+   flags, or a second bind before restore. The texture must not be sampled
+   while it is bound. Restore before returning from scene.render. */
+#define KEK_TARGET_CLEAR_COLOR 1u
+int kek_target_bind(KEK_engine* engine, KEK_TextureHandle texture, unsigned flags);
+/* Restores the interrupted frame and releases its temporary depth. Safe when
+   no texture is bound. */
+void kek_target_restore(KEK_engine* engine);
 
 /* Keyboard events from the platform layer. Each updates the engine's keyboard
    state before it reaches the scene's key_down/key_up callback, so a callback

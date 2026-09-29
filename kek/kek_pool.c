@@ -218,7 +218,8 @@ KEK_texture* kek_texture_get(KEK_engine* e, KEK_TextureHandle handle) {
 void kek_texture_destroy(KEK_engine* e, KEK_TextureHandle handle) {
     KEK_TexturePoolSlot* slot;
 
-    if (!e || handle == e->default_texture || !kek_texture_get(e, handle)) {
+    if (!e || handle == e->default_texture || (e->target_active && handle == e->target_handle)
+        || !kek_texture_get(e, handle)) {
         return;
     }
 
@@ -348,6 +349,9 @@ void kek_model_destroy(KEK_engine* e, KEK_ModelHandle handle) {
     }
 
     slot = &e->model_pool.slots[kek_pool_model_index(handle)];
+    if (slot->model.owns_texture && e->target_active && slot->model.texture == e->target_handle) {
+        return;
+    }
     if (slot->model.owns_texture) {
         kek_texture_destroy(e, slot->model.texture);
     }

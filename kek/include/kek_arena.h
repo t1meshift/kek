@@ -36,7 +36,8 @@ typedef size_t KEK_ArenaMark;
 /* The lifetime of a level, or of anything else loaded as a batch: take a mark
    before loading it and release to the mark when done. Every model and texture
    created since is gone, and their handles no longer resolve. A mark taken
-   before a later release to below it does nothing. */
+   before a later release to below it does nothing. Release does nothing while
+   a texture is bound as a render target; restore the frame first. */
 KEK_ArenaMark kek_arena_mark(const KEK_engine* engine);
 void kek_arena_release(KEK_engine* engine, KEK_ArenaMark mark);
 

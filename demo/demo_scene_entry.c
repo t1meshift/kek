@@ -12,6 +12,12 @@
 #include "kek_texture.h"
 #include "demo_scenes/demo_scene_entry.h"
 
+#define DEMO_MIRROR_Z 6.f
+#define DEMO_MIRROR_SIZE 128u
+
+static const KEK_FVec3 DEMO_MODEL_POSITION = { 1.5f, -1.f, 4.5f };
+static const KEK_FVec3 DEMO_MIRROR_POSITION = {-1.f, -0.5f, DEMO_MIRROR_Z};
+
 /* +1, -1 or 0 when both or neither are held, as one input axis. */
 static float key_axis(const KEK_engine* e, KEK_scancode positive, KEK_scancode negative) {
     return (float)kek_key_held(e, positive) - (float)kek_key_held(e, negative);
@@ -35,6 +41,9 @@ static void DEMO_EntryScene_reset_(DEMO_EntryScene* s) {
     s->fps = 0.f;
     s->model = KEK_MODEL_HANDLE_INVALID;
     s->texture = KEK_TEXTURE_HANDLE_INVALID;
+    s->mirror_model = KEK_MODEL_HANDLE_INVALID;
+    s->mirror_frame_model = KEK_MODEL_HANDLE_INVALID;
+    s->mirror_texture = KEK_TEXTURE_HANDLE_INVALID;
 }
 
 DEMO_EntryScene DEMO_EntryScene_init(void) {
@@ -74,6 +83,54 @@ void DEMO_EntryScene_load_assets_(DEMO_EntryScene* s, KEK_engine* e) {
     }
 } 
 
+/* A front-facing square. U is reversed because the camera behind the mirror
+   looks toward -z, reversing its screen's horizontal axis. */
+static void DEMO_EntryScene_make_mirror_(DEMO_EntryScene* s, KEK_engine* e) {
+    static const KEK_FVec3 positions[4] = {
+        {-1.2f,  1.2f, 0.f}, { 1.2f,  1.2f, 0.f},
+        { 1.2f, -1.2f, 0.f}, {-1.2f, -1.2f, 0.f}
+    };
+    static const KEK_FVec3 frame_positions[4] = {
+        {-1.35f,  1.35f, 0.f}, { 1.35f,  1.35f, 0.f},
+        { 1.35f, -1.35f, 0.f}, {-1.35f, -1.35f, 0.f}
+    };
+    KEK_model* mirror;
+    KEK_model* frame;
+
+    s->mirror_texture = kek_texture_create(e, DEMO_MIRROR_SIZE, DEMO_MIRROR_SIZE);
+    if (s->mirror_texture == KEK_TEXTURE_HANDLE_INVALID) {
+        return;
+    }
+    s->mirror_model = kek_model_create(e, 4, 2, 4, KEK_MODEL_FACE_UVS);
+    mirror = kek_model_get(e, s->mirror_model);
+    if (!mirror) {
+        kek_texture_destroy(e, s->mirror_texture);
+        s->mirror_texture = KEK_TEXTURE_HANDLE_INVALID;
+        return;
+    }
+
+    kek_model_quantise(mirror, positions);
+    mirror->faces[0] = (KEK_model_face){1, 2, 3};
+    mirror->faces[1] = (KEK_model_face){1, 3, 0};
+    mirror->uvs[0] = (KEK_FVec2){1.f, 0.f};
+    mirror->uvs[1] = (KEK_FVec2){0.f, 0.f};
+    mirror->uvs[2] = (KEK_FVec2){0.f, 1.f};
+    mirror->uvs[3] = (KEK_FVec2){1.f, 1.f};
+    mirror->face_uvs[0] = (KEK_model_face_uv){1, 2, 3};
+    mirror->face_uvs[1] = (KEK_model_face_uv){1, 3, 0};
+    mirror->texture = s->mirror_texture;
+
+    s->mirror_frame_model = kek_model_create(e, 4, 2, 0, KEK_MODEL_FACE_COLORS);
+    frame = kek_model_get(e, s->mirror_frame_model);
+    if (frame) {
+        kek_model_quantise(frame, frame_positions);
+        frame->faces[0] = (KEK_model_face){1, 2, 3};
+        frame->faces[1] = (KEK_model_face){1, 3, 0};
+        frame->face_colors[0] = 7;
+        frame->face_colors[1] = 7;
+    }
+}
+
 void DEMO_EntryScene_enter(KEK_scene* scene, KEK_engine* e) {
     DEMO_EntryScene* s = (DEMO_EntryScene*)scene;
     DEMO_EntryScene_reset_(s);
@@ -82,6 +139,7 @@ void DEMO_EntryScene_enter(KEK_scene* scene, KEK_engine* e) {
     kek_3d_set_fog(e, 6.f, 25.f);
 
     DEMO_EntryScene_load_assets_(s, e);
+    DEMO_EntryScene_make_mirror_(s, e);
 }
 
 void DEMO_EntryScene_exit(KEK_scene* scene, KEK_engine* e) {
@@ -92,8 +150,20 @@ void DEMO_EntryScene_exit(KEK_scene* scene, KEK_engine* e) {
     if (s->texture != KEK_TEXTURE_HANDLE_INVALID) {
         kek_texture_destroy(e, s->texture);
     }
+    if (s->mirror_model != KEK_MODEL_HANDLE_INVALID) {
+        kek_model_destroy(e, s->mirror_model);
+    }
+    if (s->mirror_frame_model != KEK_MODEL_HANDLE_INVALID) {
+        kek_model_destroy(e, s->mirror_frame_model);
+    }
+    if (s->mirror_texture != KEK_TEXTURE_HANDLE_INVALID) {
+        kek_texture_destroy(e, s->mirror_texture);
+    }
     s->model = KEK_MODEL_HANDLE_INVALID;
     s->texture = KEK_TEXTURE_HANDLE_INVALID;
+    s->mirror_model = KEK_MODEL_HANDLE_INVALID;
+    s->mirror_frame_model = KEK_MODEL_HANDLE_INVALID;
+    s->mirror_texture = KEK_TEXTURE_HANDLE_INVALID;
 }
 
 void DEMO_EntryScene_update(KEK_scene* scene, KEK_engine* e, float dt) {
@@ -157,6 +227,28 @@ void DEMO_EntryScene_update(KEK_scene* scene, KEK_engine* e, float dt) {
 void DEMO_EntryScene_render(KEK_scene* scene, KEK_engine* e) {
     DEMO_EntryScene* s = (DEMO_EntryScene*)scene;
     KEK_model* mdl = kek_model_get(e, s->model);
+    KEK_model* mirror = kek_model_get(e, s->mirror_model);
+    KEK_model* frame = kek_model_get(e, s->mirror_frame_model);
+    KEK_camera reflected = s->camera;
+    KEK_light saved_light;
+    int mirror_ready = 0;
+    /* One turn every ten seconds, shared by the reflection and main view. */
+    float rotate = 3.1415f * s->elapsed / 5.f;
+
+    if (mdl && mirror && s->camera.position.z < DEMO_MIRROR_Z - 0.1f
+        && kek_target_bind(e, s->mirror_texture, KEK_TARGET_CLEAR_COLOR)) {
+        reflected.position.z = 2.f * DEMO_MIRROR_Z - s->camera.position.z;
+        reflected.rotation.y = 3.14159265f - s->camera.rotation.y;
+        reflected.rotation.z = -s->camera.rotation.z;
+        /* The demo has no room geometry yet; a pale backing makes the dark
+           cat's silhouette legible in the reflected view. */
+        kek_2d_rect(e, (KEK_IVec2){0, 0},
+                    (KEK_IVec2){DEMO_MIRROR_SIZE - 1, DEMO_MIRROR_SIZE}, 8);
+        kek_3d_draw_model(e, mdl, &reflected, DEMO_MODEL_POSITION,
+                          (KEK_FVec3){0.f, rotate, 0.f});
+        kek_target_restore(e);
+        mirror_ready = 1;
+    }
 
     for (int i = 0; i < 16; ++i) {
         char kal[8] = {0,};
@@ -165,31 +257,26 @@ void DEMO_EntryScene_render(KEK_scene* scene, KEK_engine* e) {
         kek_2d_text_5x8(e, &KEK_FONT_DEFAULT_5X8, (KEK_IVec2) {10, i*8}, kal, 15);
     }
 
-    /* One turn every ten seconds, from accumulated seconds rather than a frame
-       count over target_fps — which stopped being time once dt became real. */
-    float rotate = 3.1415f * s->elapsed / 5.f;
-    
     if (mdl) {
-            kek_3d_draw_model(e, mdl, &s->camera, (KEK_FVec3) {
-                .x = 0.f,
-                .y = -1.f,
-                .z = 4.5f
-            },  (KEK_FVec3) {
-                .x = 0,
-                .y = rotate,
-                .z = 0
-            });
-        // for (int i = 0; i < 5; ++i) {
-        //     kek_3d_draw_model(e, mdl, &s->camera, (KEK_FVec3) {
-        //         .x = (float)i * 1.5f,
-        //         .y = (float)i,
-        //         .z = (float)(i + 1)*2.5f
-        //     },  (KEK_FVec3) {
-        //         .x = rotate * (i % 2 ? 1.f : -1.f),
-        //         .y = rotate * (i % 2 ? -1.f : 1.f),
-        //         .z = 0
-        //     });
-        // }
+        kek_3d_draw_model(e, mdl, &s->camera, DEMO_MODEL_POSITION,
+                          (KEK_FVec3){0.f, rotate, 0.f});
+    }
+
+    if (mirror_ready) {
+        /* An emitting mirror should not receive the directional light and
+           fog a second time after those already shaded its texture. */
+        saved_light = e->light;
+        kek_3d_set_light(e, saved_light.direction, 1.f);
+        kek_3d_set_fog(e, 0.f, 0.f);
+        if (frame) {
+            KEK_FVec3 frame_position = DEMO_MIRROR_POSITION;
+            frame_position.z += 0.1f;
+            kek_3d_draw_model(e, frame, &s->camera, frame_position,
+                              (KEK_FVec3){0.f, 0.f, 0.f});
+        }
+        kek_3d_draw_model(e, mirror, &s->camera, DEMO_MIRROR_POSITION,
+                          (KEK_FVec3){0.f, 0.f, 0.f});
+        e->light = saved_light;
     }
 
     char buf[128];

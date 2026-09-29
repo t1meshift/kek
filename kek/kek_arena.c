@@ -103,6 +103,11 @@ void kek_arena_release(KEK_engine* e, KEK_ArenaMark mark) {
     if (!e) {
         return;
     }
+    /* Releasing assets during a target pass could retire the texture whose
+       pixels are currently the framebuffer. Keep the pass stable. */
+    if (e->target_active) {
+        return;
+    }
     if (mark < e->arena.floor) {
         mark = e->arena.floor;
     }

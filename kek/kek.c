@@ -6,6 +6,7 @@
 #include "kek_palette.h"
 #include "kek_config.h"
 #include "kek_math.h"
+#include "kek_texture.h"
 #include "kek_internal.h"
 
 static uint16_t kek_desc_models_(const KEK_desc* desc) {
@@ -50,6 +51,13 @@ int kek_init(KEK_engine* e, const KEK_desc* desc, void* memory, size_t size) {
     result.shading_palette = (uint8_t*)kek_memory_take_(&cursor, (size_t)256u * KEK_PALETTE_SHADING_LEVELS);
     result.w = desc->width;
     result.h = desc->height;
+    result.target_saved_fb = 0;
+    result.target_saved_db = 0;
+    result.target_saved_w = 0;
+    result.target_saved_h = 0;
+    result.target_temp_mark = 0;
+    result.target_handle = KEK_TEXTURE_HANDLE_INVALID;
+    result.target_active = 0;
     result.target_fps = KEK_TARGET_FPS;
     /* Everything after the palettes, to the last alignment boundary in the
        block. The tables and the defaults come first, from kek_pool_init. */
@@ -137,6 +145,59 @@ void kek_request_scene(KEK_engine *e, KEK_scene *scene) {
 void kek_flush_buffers(KEK_engine* e) {
     memset(e->fb, 0, (size_t)e->w * e->h);
     memset(e->db, 0, (size_t)e->w * e->h * sizeof(uint16_t));
+}
+
+int kek_target_bind(KEK_engine* e, KEK_TextureHandle handle, unsigned flags) {
+    KEK_texture* texture;
+    size_t pixels, mark;
+    uint16_t* depth;
+
+    if (!e || e->target_active || (flags & ~KEK_TARGET_CLEAR_COLOR) != 0u) {
+        return 0;
+    }
+    texture = kek_texture_get(e, handle);
+    if (!texture || !texture->data || !texture->width || !texture->height) {
+        return 0;
+    }
+    pixels = (size_t)texture->width * texture->height;
+    if (pixels > (SIZE_MAX - (KEK_MEMORY_ALIGN - 1u)) / sizeof(uint16_t)) {
+        return 0;
+    }
+    mark = kek_arena_temp_mark(&e->arena);
+    depth = (uint16_t*)kek_arena_temp(&e->arena, pixels * sizeof(uint16_t));
+    if (!depth) {
+        return 0;
+    }
+
+    e->target_saved_fb = e->fb;
+    e->target_saved_db = e->db;
+    e->target_saved_w = e->w;
+    e->target_saved_h = e->h;
+    e->target_temp_mark = mark;
+    e->target_handle = handle;
+    e->target_active = 1;
+    e->fb = texture->data;
+    e->db = depth;
+    e->w = texture->width;
+    e->h = texture->height;
+    memset(depth, 0, pixels * sizeof(uint16_t));
+    if (flags & KEK_TARGET_CLEAR_COLOR) {
+        memset(texture->data, 0, pixels);
+    }
+    return 1;
+}
+
+void kek_target_restore(KEK_engine* e) {
+    if (!e || !e->target_active) {
+        return;
+    }
+    e->fb = e->target_saved_fb;
+    e->db = e->target_saved_db;
+    e->w = e->target_saved_w;
+    e->h = e->target_saved_h;
+    kek_arena_temp_release(&e->arena, e->target_temp_mark);
+    e->target_handle = KEK_TEXTURE_HANDLE_INVALID;
+    e->target_active = 0;
 }
 
 void kek_key_down(KEK_engine* e, uint16_t key) {
@@ -229,10 +290,15 @@ void kek_update(KEK_engine* e, float dt) {
 }
 
 void kek_render(KEK_engine* e) {
+    /* A scene must restore its target before it returns. Recover the main
+       frame if it does not, so a platform never presents the target's smaller
+       buffer as though it were the screen. */
+    kek_target_restore(e);
     kek_flush_buffers(e);
     
     KEK_scene* s = e->scene;
     if (s && s->render) {
         s->render(s, e);
     }
+    kek_target_restore(e);
 }

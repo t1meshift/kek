@@ -68,6 +68,29 @@ static void far_square(uint8_t color) {
     flat(vertex(140, 30, 10.f), vertex(140, 130, 10.f), vertex(40, 130, 10.f), color);
 }
 
+void test_view_near_plane_sets_depth_precision_for_flat_and_textured_triangles(void) {
+    KEK_camera camera = KEK_DEFAULT_CAMERA;
+    size_t center = (size_t)60 * e.w + 60;
+    uint16_t default_depth, near_depth;
+
+    TEST_ASSERT_TRUE(kek_3d_begin_view(&e, &camera));
+    flat(vertex(40, 40, 3.f), vertex(120, 40, 3.f), vertex(40, 120, 3.f), NEAR_INK);
+    default_depth = e.db[center];
+    TEST_ASSERT_GREATER_THAN_UINT16(0, default_depth);
+
+    kek_flush_buffers(&e);
+    camera.near_plane = 1.f;
+    TEST_ASSERT_TRUE(kek_3d_begin_view(&e, &camera));
+    flat(vertex(40, 40, 3.f), vertex(120, 40, 3.f), vertex(40, 120, 3.f), NEAR_INK);
+    near_depth = e.db[center];
+    TEST_ASSERT_UINT16_WITHIN(1, 21845, near_depth);
+    TEST_ASSERT_GREATER_THAN_UINT16(default_depth, near_depth);
+
+    kek_flush_buffers(&e);
+    textured(vertex(40, 40, 3.f), vertex(120, 40, 3.f), vertex(40, 120, 3.f));
+    TEST_ASSERT_EQUAL_UINT16(near_depth, e.db[center]);
+}
+
 /* ---- Depth ---- */
 
 void test_the_nearer_surface_wins_drawn_last(void) {
@@ -365,13 +388,42 @@ static void draw_cube(float x, float y, float z, float turn) {
     rotation.x = turn;
     rotation.y = turn * 2.f;
     rotation.z = turn * 0.5f;
-    kek_3d_draw_model(&e, cube, &camera, pos, rotation);
+    kek_3d_begin_view(&e, &camera);
+    kek_3d_draw_model(&e, cube, (KEK_Transform3D){pos, rotation, {1.f, 1.f, 1.f}});
 }
 
 void test_a_cube_in_front_of_the_camera_draws(void) {
     draw_cube(0.f, 0.f, 3.f, 0.6f);
     TEST_ASSERT_GREATER_THAN_INT(0, kek_test_frame_painted(&e));
     kek_test_frame_assert_guards();
+}
+
+void test_model_scale_changes_coverage_and_view_is_cached(void) {
+    KEK_camera camera = KEK_DEFAULT_CAMERA;
+    KEK_model* cube = kek_model_get(&e, kek_default_cube_model_handle(&e));
+    KEK_Transform3D transform = {{0.f, 0.f, 5.f}, {0.f, 0.f, 0.f}, {1.f, 1.f, 1.f}};
+    int normal_pixels, scaled_pixels;
+
+    TEST_ASSERT_TRUE(kek_3d_begin_view(&e, &camera));
+    kek_3d_draw_model(&e, cube, transform);
+    normal_pixels = kek_test_frame_painted(&e);
+    TEST_ASSERT_GREATER_THAN_INT(0, normal_pixels);
+
+    kek_flush_buffers(&e);
+    transform.scale = (KEK_FVec3){2.f, 2.f, 2.f};
+    kek_3d_draw_model(&e, cube, transform);
+    scaled_pixels = kek_test_frame_painted(&e);
+    TEST_ASSERT_GREATER_THAN_INT(normal_pixels, scaled_pixels);
+
+    kek_flush_buffers(&e);
+    camera.position.x = 100.f;
+    kek_3d_draw_model(&e, cube, transform);
+    TEST_ASSERT_EQUAL_INT(scaled_pixels, kek_test_frame_painted(&e));
+
+    kek_flush_buffers(&e);
+    TEST_ASSERT_TRUE(kek_3d_begin_view(&e, &camera));
+    kek_3d_draw_model(&e, cube, transform);
+    TEST_ASSERT_EQUAL_INT(0, kek_test_frame_painted(&e));
 }
 
 /* The view-space vertices are a temporary from the arena. A model with more
@@ -385,7 +437,8 @@ void test_a_model_too_big_to_transform_draws_nothing(void) {
 
     /* 65535 view-space vertices are 786,420 bytes, past the test arena. */
     huge.verts_count = 0xFFFFu;
-    kek_3d_draw_model(&e, &huge, &camera, (KEK_FVec3){ 0.f, 0.f, 3.f }, (KEK_FVec3){ 0.f, 0.f, 0.f });
+    kek_3d_begin_view(&e, &camera);
+    kek_3d_draw_model(&e, &huge, (KEK_Transform3D){(KEK_FVec3){ 0.f, 0.f, 3.f }, (KEK_FVec3){ 0.f, 0.f, 0.f }, {1.f, 1.f, 1.f}});
     TEST_ASSERT_EQUAL_INT(0, kek_test_frame_painted(&e));
     TEST_ASSERT_EQUAL_size_t(free_bytes, kek_arena_available(&e));
 
@@ -454,7 +507,8 @@ static void draw_wall(int facing_camera) {
     wall.faces_count = 2;
     wall.texture = KEK_TEXTURE_HANDLE_INVALID;
     kek_model_quantise(&wall, positions);
-    kek_3d_draw_model(&e, &wall, &camera, zero, zero);
+    kek_3d_begin_view(&e, &camera);
+    kek_3d_draw_model(&e, &wall, (KEK_Transform3D){zero, zero, {1.f, 1.f, 1.f}});
 }
 
 void test_a_huge_wall_across_the_near_plane_is_culled_by_its_winding_alone(void) {
@@ -506,7 +560,8 @@ static void draw_panel(const KEK_FVec3 corners[4], const KEK_camera* camera) {
     panel.faces_count = 2;
     panel.texture = KEK_TEXTURE_HANDLE_INVALID;
     kek_model_quantise(&panel, corners);
-    kek_3d_draw_model(&e, &panel, &cam, zero, zero);
+    kek_3d_begin_view(&e, &cam);
+    kek_3d_draw_model(&e, &panel, (KEK_Transform3D){zero, zero, {1.f, 1.f, 1.f}});
 }
 
 /* Square to the default camera at depth z, facing it: its normal is -z. */
@@ -809,6 +864,8 @@ int main(void) {
     RUN_TEST(test_repeat_wraps_the_same_whatever_repeat_it_starts_in);
     RUN_TEST(test_uvs_past_the_texture_sample_its_edge_under_clamp);
     RUN_TEST(test_a_cube_in_front_of_the_camera_draws);
+    RUN_TEST(test_model_scale_changes_coverage_and_view_is_cached);
+    RUN_TEST(test_view_near_plane_sets_depth_precision_for_flat_and_textured_triangles);
     RUN_TEST(test_a_cube_behind_the_camera_or_past_the_far_plane_draws_nothing);
     RUN_TEST(test_cubes_through_the_near_plane_and_off_the_edges_stay_in_the_frame);
     RUN_TEST(test_a_huge_wall_across_the_near_plane_is_culled_by_its_winding_alone);

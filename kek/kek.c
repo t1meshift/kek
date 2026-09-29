@@ -51,6 +51,13 @@ int kek_init(KEK_engine* e, const KEK_desc* desc, void* memory, size_t size) {
     result.shading_palette = (uint8_t*)kek_memory_take_(&cursor, (size_t)256u * KEK_PALETTE_SHADING_LEVELS);
     result.w = desc->width;
     result.h = desc->height;
+    memset(&result.view_camera, 0, sizeof(result.view_camera));
+    memset(&result.view_rotation, 0, sizeof(result.view_rotation));
+    result.view_focal_length = 0.f;
+    result.view_aspect_ratio = 0.f;
+    result.view_half_w = result.view_half_h = 0.f;
+    result.view_depth_scale = 6553.5f;
+    result.view_valid = 0;
     result.target_saved_fb = 0;
     result.target_saved_db = 0;
     result.target_saved_w = 0;
@@ -181,6 +188,7 @@ int kek_target_bind(KEK_engine* e, KEK_TextureHandle handle, unsigned flags) {
     e->db = depth;
     e->w = texture->width;
     e->h = texture->height;
+    e->view_valid = 0;
     memset(depth, 0, pixels * sizeof(uint16_t));
     if (flags & KEK_TARGET_CLEAR_COLOR) {
         memset(texture->data, 0, pixels);
@@ -196,6 +204,7 @@ void kek_target_restore(KEK_engine* e) {
     e->db = e->target_saved_db;
     e->w = e->target_saved_w;
     e->h = e->target_saved_h;
+    e->view_valid = 0;
     kek_arena_temp_release(&e->arena, e->target_temp_mark);
     e->target_handle = KEK_TEXTURE_HANDLE_INVALID;
     e->target_active = 0;

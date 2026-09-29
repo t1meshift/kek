@@ -283,17 +283,6 @@ separates them, at ~8 seconds a frame in float, and it is not a target (see Sett
 
 ## Tier 3 — Engine: prerequisites for levels
 
-- **No scale, no transform type.** `kek_3d_draw_model(e, mdl, camera, pos, rotation)`
-  ([kek_3d.h](kek/include/kek_3d.h)) — required before anything can be placed in a world.
-- **The camera is set up again for every model.** `kek_3d_draw_model` builds the camera's matrix
-  (6 `sinf`/`cosf`) and its focal length (`tanf`) on every call, though they change once a frame. With
-  DJGPP's libm, which is fdlibm in software, that is ~1,100 cycles a model on a Pentium 100 and ~3,500
-  on a 486DX2-66, measured on 86Box. A view set once — `kek_3d_begin_view(e, camera)` or the camera
-  cached in the engine — takes it off the per-model path. It changes the same signature as the
-  transform item above, so the two go together. The view is also where the depth buffer's scale
-  belongs: `KEK_3D_DEPTH_SCALE` is a constant that puts 65535 at the default camera's near plane, 0.1,
-  so a camera with its near plane at 1 uses a tenth of the range. Taken from the view's near plane
-  instead, every camera would get all 16 bits.
 - **Own transcendentals.** libm calls across four files: `sinf`/`cosf` (18), `roundf` (4), `tanf` (2),
   `sqrtf` (2), `floorf`, `fabsf` (2). Table-driven replacements drop the libm dependency and, more
   importantly, make rendering bit-reproducible across toolchains — libm accuracy is not specified, unlike
@@ -310,8 +299,8 @@ separates them, at ~8 seconds a frame in float, and it is not a target (see Sett
   | `lrintf` | 65 | 147 |
   | `(int)` cast | 26 | 58 |
 
-  Per frame that is small next to the pixels: trigonometry is per model (and mostly the camera's,
-  above), `sqrtf` per face in the light, ~1 ms and ~2.5 ms for 300 faces. `floorf` was twice per
+  Per frame that is small next to the pixels: camera trigonometry is once per view and model
+  trigonometry once per model; `sqrtf` per face in the light costs ~1 ms and ~2.5 ms for 300 faces. `floorf` was twice per
   texel under `REPEAT`, ~33 ms of a full-screen wall on the Pentium, until the scanline rasteriser
   wrapped with a mask; it is left only where a span end lands past ±32,768 texels, and in the
   per-pixel sampler that textures whose sides are not powers of two still go through. `sqrtf` has a
@@ -500,6 +489,7 @@ on the hash has the reasoning, the measurements and what was verified.
 | Render to texture | A bound `KEK_texture` uses its pixels as the frame, a temporary depth buffer, and the texture's dimensions; bind/restore preserves the main view. The mirror demo draws the reflected scene into a texture | `2286811` |
 | Fog stopped at a dim shade | Distance was added to the light shade, so distant faces stayed visible and dark faces faded sooner. Fog is now independent coverage toward a chosen palette index, dithered 4×4 and perspective-correct across large surfaces; light retains all its rows | `92b84f3` |
 | No 2D image drawing | Region blits and transformed blits copy palette indices from textures, with clipping and an optional transparent index. They also work with a bound render target | `e470902` |
+| No 3D scale or prepared view | `KEK_Transform3D` carries position, rotation and scale; `kek_3d_begin_view` caches the camera rotation, lens and near-plane depth scale once per view | current work |
 | Divides in the per-pixel loop | Three per pixel in `kek_3d_triangle` (`w0 / area`), five in `kek_3d_triangle_textured` (and `u_over_z / inv_z`), and no way to measure them. A benchmark in `bench/`; one divide per triangle, attributes as planes stepped by adds, and perspective divided out every 16 pixels with affine spans between, as in Quake. On an emulated 486DX2-66 (86Box, DJGPP): flat quad 791 → 445 ms, textured quad 1,681 → 1,242 ms, textured cube 478 → 346 ms | `954cb4c`, `0945961` |
 | Depth buffer the largest allocation | A `float` per pixel, 256,000 of a 320×200 block's 329,487 bytes. 1/z in a `uint16_t`, scaled so 65535 is the default near plane, saturating at both ends; the block is 201,487 | `6da6808` |
 | The sampler per textured pixel | `kek_texture_sample` was a call per pixel with a branch on the warp mode, `floorf` twice under `REPEAT` and two conversions. The span loop steps u and v in 16.16 and masks for wrap; only textures whose sides are not powers of two still go through it | `035fd37` |

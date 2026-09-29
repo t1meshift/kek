@@ -134,13 +134,12 @@ static void DEMO_EntryScene_make_floor_(DEMO_EntryScene* s, KEK_engine* e) {
     floor->texture = kek_default_texture_handle(e);
 }
 
-static void DEMO_EntryScene_draw_floor_(DEMO_EntryScene* s, KEK_engine* e, KEK_camera* camera) {
+static void DEMO_EntryScene_draw_floor_(DEMO_EntryScene* s, KEK_engine* e) {
     KEK_model* floor = kek_model_get(e, s->floor_model);
     if (floor) {
         KEK_TextureWarpMode warp = kek_texture_get_warp_mode(e);
         kek_texture_set_warp_mode(e, KEK_TEXTURE_WARP_REPEAT);
-        kek_3d_draw_model(e, floor, camera, DEMO_FLOOR_POSITION,
-                          (KEK_FVec3){0.f, 0.f, 0.f});
+        kek_3d_draw_model(e, floor, (KEK_Transform3D){DEMO_FLOOR_POSITION, {0.f, 0.f, 0.f}, {1.f, 1.f, 1.f}});
         kek_texture_set_warp_mode(e, warp);
     }
 }
@@ -312,6 +311,10 @@ void DEMO_EntryScene_render(KEK_scene* scene, KEK_engine* e) {
     int mirror_ready = 0;
     /* One turn every ten seconds, shared by the reflection and main view. */
     float rotate = 3.1415f * s->elapsed / 5.f;
+    /* A two-second width pulse, from 0.8 to 1.2 and back. Use the same
+       transform in both views so the reflection stays in sync. */
+    float width = 1.f + 0.2f * sinf(3.14159265f * s->elapsed);
+    KEK_Transform3D cat_transform = {DEMO_MODEL_POSITION, {0.f, rotate, 0.f}, {width, 1.f, 1.f}};
 
     kek_2d_rect(e, (KEK_IVec2){0, 0}, (KEK_IVec2){e->w, e->h}, DEMO_SKY_COLOR);
 
@@ -322,14 +325,15 @@ void DEMO_EntryScene_render(KEK_scene* scene, KEK_engine* e) {
             3.14159265f - s->camera_yaw, s->camera_pitch);
         kek_2d_rect(e, (KEK_IVec2){0, 0},
                     (KEK_IVec2){DEMO_MIRROR_SIZE, DEMO_MIRROR_SIZE}, DEMO_SKY_COLOR);
-        DEMO_EntryScene_draw_floor_(s, e, &reflected);
-        kek_3d_draw_model(e, mdl, &reflected, DEMO_MODEL_POSITION,
-                          (KEK_FVec3){0.f, rotate, 0.f});
+        kek_3d_begin_view(e, &reflected);
+        DEMO_EntryScene_draw_floor_(s, e);
+        kek_3d_draw_model(e, mdl, cat_transform);
         kek_target_restore(e);
         mirror_ready = 1;
     }
 
-    DEMO_EntryScene_draw_floor_(s, e, &s->camera);
+    kek_3d_begin_view(e, &s->camera);
+    DEMO_EntryScene_draw_floor_(s, e);
 
     for (int i = 0; i < 16; ++i) {
         char kal[8] = {0,};
@@ -339,8 +343,7 @@ void DEMO_EntryScene_render(KEK_scene* scene, KEK_engine* e) {
     }
 
     if (mdl) {
-        kek_3d_draw_model(e, mdl, &s->camera, DEMO_MODEL_POSITION,
-                          (KEK_FVec3){0.f, rotate, 0.f});
+        kek_3d_draw_model(e, mdl, cat_transform);
     }
 
     if (mirror_ready) {
@@ -352,11 +355,9 @@ void DEMO_EntryScene_render(KEK_scene* scene, KEK_engine* e) {
         if (frame) {
             KEK_FVec3 frame_position = DEMO_MIRROR_POSITION;
             frame_position.z += 0.1f;
-            kek_3d_draw_model(e, frame, &s->camera, frame_position,
-                              (KEK_FVec3){0.f, 0.f, 0.f});
+            kek_3d_draw_model(e, frame, (KEK_Transform3D){frame_position, {0.f, 0.f, 0.f}, {1.f, 1.f, 1.f}});
         }
-        kek_3d_draw_model(e, mirror, &s->camera, DEMO_MIRROR_POSITION,
-                          (KEK_FVec3){0.f, 0.f, 0.f});
+        kek_3d_draw_model(e, mirror, (KEK_Transform3D){DEMO_MIRROR_POSITION, {0.f, 0.f, 0.f}, {1.f, 1.f, 1.f}});
         e->light = saved_light;
     }
 

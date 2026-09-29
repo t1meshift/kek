@@ -24,8 +24,8 @@ KEK_camera KEK_DEFAULT_CAMERA = {
 /* 1/z as the depth buffer holds it. NaN, and whatever rounds below 1, is the
    farthest a pixel can be rather than the clear, so it still draws on an
    empty frame, as it did while the buffer was float. */
-static uint16_t kek_3d_depth_quantise(float inv_z) {
-    float depth = inv_z * KEK_3D_DEPTH_SCALE;
+static uint16_t kek_3d_depth_quantise(float inv_z, double scale) {
+    double depth = (double)inv_z * scale;
 
     if (!(depth >= 1.f)) {
         return 1;
@@ -38,7 +38,7 @@ static uint16_t kek_3d_depth_quantise(float inv_z) {
 
 static char kek_3d_depth_test(KEK_engine* engine, uint16_t x, uint16_t y, float inv_z) {
     uint32_t index = (uint32_t)y * (uint32_t)engine->w + (uint32_t)x;
-    uint16_t depth = kek_3d_depth_quantise(inv_z);
+    uint16_t depth = kek_3d_depth_quantise(inv_z, engine->view_depth_scale);
 
     if (depth <= engine->db[index]) {
         return 0;
@@ -186,6 +186,24 @@ typedef struct KEK_3D_Lens_ {
 static KEK_3D_Lens_ kek_3d_lens_(const KEK_engine* e, const KEK_camera* c) {
     return (KEK_3D_Lens_){ 1.f / tanf(c->fov * KEK_PI / 360.f),
         (float)e->w / (float)e->h, (float)e->w * 0.5f, (float)e->h * 0.5f };
+}
+
+int kek_3d_begin_view(KEK_engine* e, const KEK_camera* camera) {
+    KEK_3D_Lens_ lens;
+    if (!e) return 0;
+    e->view_valid = 0;
+    if (!camera || !kek_3d_camera_valid_(camera)) return 0;
+    lens = kek_3d_lens_(e, camera);
+    if (!(lens.focal_length > 0.f && lens.focal_length <= FLT_MAX)) return 0;
+    e->view_camera = *camera;
+    e->view_rotation = kek_3d_view_rotation_(camera->rotation);
+    e->view_focal_length = lens.focal_length;
+    e->view_aspect_ratio = lens.aspect_ratio;
+    e->view_half_w = lens.half_w;
+    e->view_half_h = lens.half_h;
+    e->view_depth_scale = 65535. * (double)camera->near_plane;
+    e->view_valid = 1;
+    return 1;
 }
 
 static inline KEK_FVec3 kek_3d_project_float_(const KEK_3D_Lens_* lens, KEK_FVec3 v) {
@@ -505,16 +523,21 @@ static int32_t kek_3d_round32(double value) {
 #define KEK_3D_DEPTH_LEAST ((int64_t)1 << 15)
 #define KEK_3D_DEPTH_MOST ((int64_t)65535 << 15)
 
-static int32_t kek_3d_depth_fixed(float inv_z, int* out_clamped) {
+static int32_t kek_3d_depth_fixed(float inv_z, double scale, int* out_clamped) {
+    double value = (double)inv_z * scale * 32768.;
     int64_t z;
 
-    if (inv_z != inv_z) {
+    if (!(value >= (double)KEK_3D_DEPTH_LEAST)) {
         *out_clamped = 1;
         return (int32_t)KEK_3D_DEPTH_LEAST;
     }
-    z = kek_3d_round((double)inv_z * (double)KEK_3D_DEPTH_SCALE * 32768.);
-    *out_clamped = z < KEK_3D_DEPTH_LEAST || z > KEK_3D_DEPTH_MOST;
-    return (int32_t)(z < KEK_3D_DEPTH_LEAST ? KEK_3D_DEPTH_LEAST : z > KEK_3D_DEPTH_MOST ? KEK_3D_DEPTH_MOST : z);
+    if (value >= (double)KEK_3D_DEPTH_MOST) {
+        *out_clamped = 1;
+        return (int32_t)KEK_3D_DEPTH_MOST;
+    }
+    z = kek_3d_round(value);
+    *out_clamped = 0;
+    return (int32_t)z;
 }
 
 /* The shade at a span's end in 4096ths of a sixteenth of a level. Not clamped
@@ -559,6 +582,7 @@ static int32_t kek_3d_span_step(int32_t from, int32_t to, int n) {
 typedef struct KEK_3D_Common_ {
     KEK_3D_Setup_ setup;
     KEK_3D_Plane_ inv_z, shade, fog;
+    double depth_scale;
     int shade_fixed;
     int shade_uniform;
     int fog_active;
@@ -575,6 +599,7 @@ typedef struct KEK_3D_Common_ {
 static void kek_3d_common(const KEK_engine* engine, const KEK_3D_ProjectedVertex vertices[3], KEK_3D_Common_* c) {
     double depth_dx, shade_dx;
 
+    c->depth_scale = engine->view_depth_scale;
     c->inv_z = kek_3d_plane(&c->setup, vertices[0].inv_z, vertices[1].inv_z, vertices[2].inv_z);
     c->shade = kek_3d_plane(&c->setup, vertices[0].shade, vertices[1].shade, vertices[2].shade);
     c->fog_active = vertices[0].fog > 0.f || vertices[1].fog > 0.f || vertices[2].fog > 0.f;
@@ -588,7 +613,7 @@ static void kek_3d_common(const KEK_engine* engine, const KEK_3D_ProjectedVertex
     c->shade_row = engine->shading_palette + (size_t)256 * (size_t)(c->shade_fixed / KEK_3D_SHADE_ONE);
     c->shade_fraction = c->shade_fixed % KEK_3D_SHADE_ONE;
 
-    depth_dx = (double)c->inv_z.dx * (double)KEK_3D_DEPTH_SCALE * 32768.;
+    depth_dx = (double)c->inv_z.dx * (double)engine->view_depth_scale * 32768.;
     c->depth_dx_fits = depth_dx > -1073741824. && depth_dx < 1073741824.;
     c->depth_dx = c->depth_dx_fits ? (int32_t)kek_3d_round(depth_dx) : 0;
     shade_dx = (double)c->shade.dx * (double)(KEK_3D_SHADE_ONE << KEK_3D_SHADE_FRACTION_BITS);
@@ -624,7 +649,7 @@ static void kek_3d_row(const KEK_3D_Common_* c, int y, int first, int last, KEK_
     float fx = (float)(first - c->setup.x0), fy = (float)(y - c->setup.y0);
     int n = last - first;
     int clamped, ignored;
-    int32_t z = kek_3d_depth_fixed(c->inv_z.origin + c->inv_z.dx * fx + c->inv_z.dy * fy, &clamped);
+    int32_t z = kek_3d_depth_fixed(c->inv_z.origin + c->inv_z.dx * fx + c->inv_z.dy * fy, c->depth_scale, &clamped);
     int64_t z_end = (int64_t)z + (int64_t)n * c->depth_dx;
 
     r->z = (uint32_t)z;
@@ -632,7 +657,7 @@ static void kek_3d_row(const KEK_3D_Common_* c, int y, int first, int last, KEK_
         r->dz = (uint32_t)c->depth_dx;
     } else {
         r->dz = (uint32_t)kek_3d_span_step(z, kek_3d_depth_fixed(kek_3d_plane_at(c->inv_z, &c->setup, last, y),
-                                                                 &ignored), n);
+                                                                 c->depth_scale, &ignored), n);
     }
 
     r->s = 0;
@@ -1324,7 +1349,7 @@ static void kek_3d_affine_span(KEK_engine* engine, const void* context, int y, i
    too. Fills a's fixed-point origins and y steps. */
 static int kek_3d_affine_fast_row_(const KEK_3D_ProjectedVertex v[3], KEK_3D_Affine_* a) {
     const KEK_3D_Common_* c = &a->c;
-    double depth_dy = (double)c->inv_z.dy * (double)KEK_3D_DEPTH_SCALE * 32768.;
+    double depth_dy = (double)c->inv_z.dy * (double)c->depth_scale * 32768.;
     int32_t z[3];
     int64_t margin, zmin, zmax;
     int k, clamped;
@@ -1334,7 +1359,7 @@ static int kek_3d_affine_fast_row_(const KEK_3D_ProjectedVertex v[3], KEK_3D_Aff
     }
     zmin = zmax = 0;
     for (k = 0; k < 3; ++k) {
-        z[k] = kek_3d_depth_fixed(v[k].inv_z, &clamped);
+        z[k] = kek_3d_depth_fixed(v[k].inv_z, c->depth_scale, &clamped);
         if (clamped) {
             return 0;
         }
@@ -1779,49 +1804,54 @@ static void kek_3d_clip_sides_(KEK_engine* e, const KEK_3D_Lens_* lens, float ne
     }
 }
 
-void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_camera *camera, KEK_FVec3 pos, KEK_FVec3 rotation) {
+void kek_3d_draw_model(KEK_engine *e, KEK_model *mdl, KEK_Transform3D transform) {
     /* The view-space vertices and their projections are temporaries off the
        top of the arena, as many as this model has, gone again at the end of
        the call. */
-    size_t mark = kek_arena_temp_mark(&e->arena);
+    size_t mark;
     KEK_FVec3* view_verts;
     KEK_3D_Projected_* projected;
-    char use_colors = mdl->face_colors != 0 && mdl->colors_count > 0;
+    char use_colors;
     /* Resolved once per model, not once per face: a stale handle just means
        the model draws untextured. */
-    KEK_texture* texture = kek_texture_get(e, mdl->texture);
-    /* Fix 4: precompute rotation matrices and projection constants once per call */
+    KEK_texture* texture;
     KEK_Mat3 model_rot, camera_rot, to_view;
     KEK_FVec3 light_view, origin;
     KEK_3D_Lens_ lens;
-    float near = camera->near_plane;
+    const KEK_camera* camera;
+    float near;
     uint32_t i;
     int row;
 
-    if (!kek_3d_camera_valid_(camera) || !kek_3d_finite_(pos) || !kek_3d_finite_(rotation)
+    if (!e || !e->view_valid || !mdl || !kek_3d_finite_(transform.position)
+        || !kek_3d_finite_(transform.rotation) || !kek_3d_finite_(transform.scale)
         || !kek_3d_finite_(mdl->scale) || !kek_3d_finite_(mdl->offset)) return;
+    mark = kek_arena_temp_mark(&e->arena);
+    use_colors = mdl->face_colors != 0 && mdl->colors_count > 0;
+    texture = kek_texture_get(e, mdl->texture);
+    camera = &e->view_camera;
+    near = camera->near_plane;
 
-    model_rot    = kek_mat3_from_euler(rotation);
-    camera_rot = kek_3d_view_rotation_(camera->rotation);
+    model_rot = kek_mat3_from_euler(transform.rotation);
+    camera_rot = e->view_rotation;
     light_view   = kek_mat3_apply(camera_rot, e->light.direction);
-    lens = kek_3d_lens_(e, camera);
-    if (!(lens.focal_length > 0.f && lens.focal_length <= FLT_MAX)) {
-        kek_arena_temp_release(&e->arena, mark);
-        return;
-    }
+    lens = (KEK_3D_Lens_){e->view_focal_length, e->view_aspect_ratio, e->view_half_w, e->view_half_h};
 
     /* A stored vertex q is at offset + scale * q in the model, so in view
-       space it is camera_rot * (model_rot * (offset + scale * q) + pos -
+       space it is camera_rot * (model_rot * (instance_scale * (offset + scale * q)) + position -
        camera): one matrix, the rotations with the scale folded into their
        columns, and one translation, so taking the bytes back to float costs
        nothing beyond the conversion. */
     to_view = kek_3d_mat3_mul(camera_rot, model_rot);
     for (row = 0; row < 3; ++row) {
-        to_view.m[row * 3 + 0] *= mdl->scale.x;
-        to_view.m[row * 3 + 1] *= mdl->scale.y;
-        to_view.m[row * 3 + 2] *= mdl->scale.z;
+        to_view.m[row * 3 + 0] *= mdl->scale.x * transform.scale.x;
+        to_view.m[row * 3 + 1] *= mdl->scale.y * transform.scale.y;
+        to_view.m[row * 3 + 2] *= mdl->scale.z * transform.scale.z;
     }
-    origin = kek_3d_translate(kek_mat3_apply(model_rot, mdl->offset), pos);
+    origin = kek_3d_translate(kek_mat3_apply(model_rot, (KEK_FVec3){
+        mdl->offset.x * transform.scale.x,
+        mdl->offset.y * transform.scale.y,
+        mdl->offset.z * transform.scale.z}), transform.position);
     origin = kek_mat3_apply(camera_rot, (KEK_FVec3){
         origin.x - camera->position.x,
         origin.y - camera->position.y,

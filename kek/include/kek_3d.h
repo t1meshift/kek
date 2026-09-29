@@ -15,25 +15,17 @@ extern "C" {
 typedef struct KEK_model KEK_model;
 #endif
 
-typedef struct KEK_camera {
-    KEK_FVec3 position;
-    /* World orientation, radians, same Z-then-Y-then-X convention as models.
-       The view applies its inverse (the transpose), then projects. */
-    KEK_FVec3 rotation;
-    float fov;
-    float near_plane;
-    float far_plane;
-} KEK_camera;
-
 extern KEK_camera KEK_DEFAULT_CAMERA;
 
-/* The depth buffer holds 1/z times this, in a uint16_t: larger is nearer, and
-   0 is the clear, which anything drawn is nearer than. 65535 is z = 0.1, the
-   default camera's near plane; anything nearer than that saturates there, and
-   anything past ~6,500 comes out as 1, the farthest a pixel can be. Being 1/z,
-   the steps grow with the square of the distance: 0.015 of a unit apart at
-   z = 10, 1.5 at z = 100. */
+/* Default-camera depth scale. begin_view uses 65535 * camera.near_plane;
+   direct triangle calls use the current view's scale, or this before one. */
 #define KEK_3D_DEPTH_SCALE 6553.5f
+
+typedef struct KEK_Transform3D {
+    KEK_FVec3 position;
+    KEK_FVec3 rotation;
+    KEK_FVec3 scale;
+} KEK_Transform3D;
 
 typedef struct KEK_3D_ProjectedVertex {
     KEK_IVec2 screen;
@@ -82,10 +74,15 @@ void kek_3d_blit_vertex(KEK_engine* engine, KEK_3D_ProjectedVertex vertex, uint8
 void kek_3d_set_light(KEK_engine* engine, KEK_FVec3 direction, float ambient);
 void kek_3d_set_fog(KEK_engine* engine, float start, float end);
 void kek_3d_set_fog_color(KEK_engine* engine, uint8_t color);
-/* Camera parameters must be finite, 0 < fov < 180, 0 < near < far.
-   Invalid cameras/transforms and non-finite transformed vertices draw nothing.
-   As before, far-plane rejection drops only faces wholly beyond far. */
-void kek_3d_draw_model(KEK_engine* e, KEK_model* model, KEK_camera* camera, KEK_FVec3 pos, KEK_FVec3 rotation);
+/* Prepare a view after binding its render target, before drawing models.
+   Returns 0 and invalidates the view for invalid camera parameters. Rebind a
+   view after restoring a target, even if its camera is unchanged. */
+int kek_3d_begin_view(KEK_engine* e, const KEK_camera* camera);
+/* Transform.scale is component-wise in model space, before rotation. A
+   negative component mirrors the model. Invalid transforms and non-finite
+   transformed vertices draw nothing. Far-plane rejection drops only faces
+   wholly beyond far. */
+void kek_3d_draw_model(KEK_engine* e, KEK_model* model, KEK_Transform3D transform);
 
 #ifdef __cplusplus
 }

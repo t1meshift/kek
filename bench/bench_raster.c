@@ -115,8 +115,8 @@ static void draw_cube(int frame, KEK_model* model) {
     KEK_camera camera = KEK_DEFAULT_CAMERA;
     float turn = (float)frame * 0.05f;
 
-    kek_3d_draw_model(&e, model, &camera, (KEK_FVec3){ 0.f, 0.f, 1.4f },
-                      (KEK_FVec3){ turn * 0.7f, turn, turn * 0.3f });
+    kek_3d_begin_view(&e, &camera);
+    kek_3d_draw_model(&e, model, (KEK_Transform3D){(KEK_FVec3){ 0.f, 0.f, 1.4f }, (KEK_FVec3){ turn * 0.7f, turn, turn * 0.3f }, {1.f, 1.f, 1.f}});
 }
 
 static void scene_cube_textured(int frame) {
@@ -192,8 +192,8 @@ static void draw_cat(int frame, float z) {
     KEK_camera camera = KEK_DEFAULT_CAMERA;
 
     kek_3d_set_fog(&e, 15.f, 45.f);
-    kek_3d_draw_model(&e, cat, &camera, (KEK_FVec3){ 0.f, -1.f, z },
-                      (KEK_FVec3){ 0.f, (float)frame * 0.05f, 0.f });
+    kek_3d_begin_view(&e, &camera);
+    kek_3d_draw_model(&e, cat, (KEK_Transform3D){(KEK_FVec3){ 0.f, -1.f, z }, (KEK_FVec3){ 0.f, (float)frame * 0.05f, 0.f }, {1.f, 1.f, 1.f}});
     kek_3d_set_fog(&e, 0.f, 0.f);
 }
 
@@ -210,8 +210,8 @@ static void scene_cat_offscreen(int frame) {
     KEK_camera camera = KEK_DEFAULT_CAMERA;
 
     kek_3d_set_fog(&e, 15.f, 45.f);
-    kek_3d_draw_model(&e, cat, &camera, (KEK_FVec3){ 100.f, -1.f, 4.5f },
-                      (KEK_FVec3){ 0.f, (float)frame * 0.05f, 0.f });
+    kek_3d_begin_view(&e, &camera);
+    kek_3d_draw_model(&e, cat, (KEK_Transform3D){(KEK_FVec3){ 100.f, -1.f, 4.5f }, (KEK_FVec3){ 0.f, (float)frame * 0.05f, 0.f }, {1.f, 1.f, 1.f}});
     kek_3d_set_fog(&e, 0.f, 0.f);
 }
 
@@ -323,7 +323,8 @@ static void draw_room(int frame, KEK_model* model, float z) {
     KEK_camera camera = KEK_DEFAULT_CAMERA;
 
     camera.rotation.y = (float)frame * 0.05f;
-    kek_3d_draw_model(&e, model, &camera, (KEK_FVec3){ 0.f, 0.f, z }, (KEK_FVec3){ 0.f, 0.f, 0.f });
+    kek_3d_begin_view(&e, &camera);
+    kek_3d_draw_model(&e, model, (KEK_Transform3D){(KEK_FVec3){ 0.f, 0.f, z }, (KEK_FVec3){ 0.f, 0.f, 0.f }, {1.f, 1.f, 1.f}});
 }
 
 static void scene_room_small(int frame) {
@@ -336,7 +337,8 @@ static void scene_room_big(int frame) {
 
 static void scene_room_hidden(int frame) {
     draw_room(frame, &room_small.model, 0.f);
-    draw_room(frame, &room_small.model, 16.f);
+    kek_3d_draw_model(&e, &room_small.model,
+                      (KEK_Transform3D){{0.f, 0.f, 16.f}, {0.f, 0.f, 0.f}, {1.f, 1.f, 1.f}});
 }
 
 typedef struct Scene {

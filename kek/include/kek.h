@@ -14,6 +14,16 @@ extern "C" {
 #include "kek_keyboard.h"
 #include "kek_light.h"
 #include "kek_pool.h"
+#include "kek_math.h"
+
+typedef struct KEK_camera {
+    KEK_FVec3 position;
+    /* World orientation in radians, Z then Y then X. */
+    KEK_FVec3 rotation;
+    float fov;
+    float near_plane;
+    float far_plane;
+} KEK_camera;
 
 typedef struct KEK_scene KEK_scene;
 #ifndef KEK_ENGINE_DEFINED
@@ -39,9 +49,18 @@ struct KEK_engine {
     KEK_palette_item* palette; /* 256-color palette */
     uint8_t* shading_palette;
     uint8_t* fb; /** framebuffer */
-    uint16_t* db; /** depth buffer: 1/z, quantised — see KEK_3D_DEPTH_SCALE */
+    uint16_t* db; /** depth buffer: 1/z, quantised for the current view */
     uint16_t w; /** buffer width */
     uint16_t h; /** buffer height */
+    /* Cached by kek_3d_begin_view; a new target needs a new view because its
+       dimensions affect the projection. */
+    KEK_camera view_camera;
+    KEK_Mat3 view_rotation;
+    float view_focal_length;
+    float view_aspect_ratio;
+    float view_half_w, view_half_h;
+    double view_depth_scale;
+    uint8_t view_valid;
     /* One temporary render target may replace the bound frame. These fields
        keep the interrupted view intact until kek_target_restore. */
     uint8_t* target_saved_fb;

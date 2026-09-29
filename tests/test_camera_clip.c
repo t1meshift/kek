@@ -45,7 +45,8 @@ static void triangle(const KEK_FVec3 positions[3], int reverse, int textured) {
         model.face_uvs_count = 1;
     }
     kek_model_quantise(&model, positions);
-    kek_3d_draw_model(&e, &model, &camera, (KEK_FVec3){0.f, 0.f, 0.f}, (KEK_FVec3){0.f, 0.f, 0.f});
+    kek_3d_begin_view(&e, &camera);
+    kek_3d_draw_model(&e, &model, (KEK_Transform3D){(KEK_FVec3){0.f, 0.f, 0.f}, (KEK_FVec3){0.f, 0.f, 0.f}, {1.f, 1.f, 1.f}});
     TEST_ASSERT_EQUAL_size_t(available, kek_arena_available(&e));
 }
 
@@ -168,17 +169,20 @@ void test_invalid_cameras_and_models_leave_frame_and_arena_unchanged(void) {
         output = before;
         TEST_ASSERT_FALSE(kek_3d_project_vertex(&e, &invalid[i], (KEK_FVec3){0.f, 0.f, 3.f}, &output));
         TEST_ASSERT_EQUAL_MEMORY(&before, &output, sizeof(output));
-        kek_3d_draw_model(&e, model, &invalid[i], (KEK_FVec3){0.f, 0.f, 3.f}, zero);
+        TEST_ASSERT_FALSE(kek_3d_begin_view(&e, &invalid[i]));
+        kek_3d_draw_model(&e, model, (KEK_Transform3D){(KEK_FVec3){0.f, 0.f, 3.f}, zero, {1.f, 1.f, 1.f}});
         TEST_ASSERT_EQUAL_size_t(available, kek_arena_available(&e));
     }
-    kek_3d_draw_model(&e, model, &camera, (KEK_FVec3){NAN, 0.f, 3.f}, zero);
-    kek_3d_draw_model(&e, model, &camera, zero, (KEK_FVec3){0.f, INFINITY, 0.f});
+    kek_3d_begin_view(&e, &camera);
+    kek_3d_draw_model(&e, model, (KEK_Transform3D){(KEK_FVec3){NAN, 0.f, 3.f}, zero, {1.f, 1.f, 1.f}});
+    kek_3d_draw_model(&e, model, (KEK_Transform3D){zero, (KEK_FVec3){0.f, INFINITY, 0.f}, {1.f, 1.f, 1.f}});
+    kek_3d_draw_model(&e, model, (KEK_Transform3D){zero, zero, {1.f, NAN, 1.f}});
     {
         KEK_model bad = *model;
         bad.scale.x = INFINITY;
-        kek_3d_draw_model(&e, &bad, &camera, zero, zero);
+        kek_3d_draw_model(&e, &bad, (KEK_Transform3D){zero, zero, {1.f, 1.f, 1.f}});
         bad.scale.x = FLT_MAX;
-        kek_3d_draw_model(&e, &bad, &camera, zero, zero);
+        kek_3d_draw_model(&e, &bad, (KEK_Transform3D){zero, zero, {1.f, 1.f, 1.f}});
     }
     TEST_ASSERT_EQUAL_size_t(available, kek_arena_available(&e));
     TEST_ASSERT_EQUAL_INT(0, kek_test_frame_painted(&e));
@@ -241,7 +245,8 @@ void test_side_clipping_interpolates_uvs_in_view_space(void) {
     for (mode = 0; mode < 2; ++mode) {
         kek_texture_set_warp_mode(&e, (KEK_TextureWarpMode)mode);
         kek_flush_buffers(&e);
-        kek_3d_draw_model(&e, &model, &camera, (KEK_FVec3){0.f, 0.f, 0.f}, (KEK_FVec3){0.f, 0.f, 0.f});
+        kek_3d_begin_view(&e, &camera);
+        kek_3d_draw_model(&e, &model, (KEK_Transform3D){(KEK_FVec3){0.f, 0.f, 0.f}, (KEK_FVec3){0.f, 0.f, 0.f}, {1.f, 1.f, 1.f}});
         /* Interior samples, away from the diagonal and texel boundaries.
            On the z=3 plane, UV=(view.x, view.y)/8, independently of clipping. */
         for (y = e.h / 2 + 11; y < e.h - 10; y += 23) {

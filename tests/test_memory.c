@@ -155,8 +155,8 @@ void test_the_engine_stays_inside_its_block_at_any_alignment(void) {
         kek_texture_destroy(&e, all);
 
         camera.position = (KEK_FVec3){ 0.f, 0.f, -4.f };
-        kek_3d_draw_model(&e, kek_model_get(&e, kek_default_cube_model_handle(&e)), &camera,
-                          (KEK_FVec3){ 0.f, 0.f, 0.f }, (KEK_FVec3){ 0.f, 0.f, 0.f });
+        kek_3d_begin_view(&e, &camera);
+        kek_3d_draw_model(&e, kek_model_get(&e, kek_default_cube_model_handle(&e)), (KEK_Transform3D){(KEK_FVec3){ 0.f, 0.f, 0.f }, (KEK_FVec3){ 0.f, 0.f, 0.f }, {1.f, 1.f, 1.f}});
 
         assert_untouched(storage, GUARD + offset, "written before the block");
         assert_untouched(block + size, sizeof(storage) - (GUARD + offset + size), "written past the block");

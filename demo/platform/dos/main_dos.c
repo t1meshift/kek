@@ -72,7 +72,7 @@ static void app_present_(App* app) {
 }
 
 /* Runs however app_init() fails or SDL_AppQuit's DOS equivalent (falling out
-   of main()) exits: text mode and IRQ9 are DOS-wide state, not this
+   of main()) exits: text mode and INT 09h are DOS-wide state, not this
    process's, so leaving either behind is a hung keyboard or a garbled
    screen for whatever runs next. */
 static void app_shutdown_(void) {
@@ -115,7 +115,9 @@ int main(void) {
     app->graphics_mode_set = 1;
     app_push_palette_(app);
 
-    dos_keyboard_install();
+    if (!dos_keyboard_install()) {
+        return 1;
+    }
     app->keyboard_installed = 1;
 
     next_frame_ticks = uclock();
@@ -133,7 +135,10 @@ int main(void) {
         last_update_ticks = ticks;
 
         dos_keyboard_pump(&app->engine);
-        if (kek_key_held(&app->engine, KEK_SCANCODE_ESCAPE)) {
+        if (kek_key_pressed(&app->engine, KEK_SCANCODE_ESCAPE)) {
+            /* Keep owning IRQ1 until the key is released, so an Escape repeat
+               cannot land in the DOS prompt as the original handler returns. */
+            dos_keyboard_wait_for_escape_release();
             break;
         }
 

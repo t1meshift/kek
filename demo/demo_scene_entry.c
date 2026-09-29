@@ -250,7 +250,9 @@ void DEMO_EntryScene_update(KEK_scene* scene, KEK_engine* e, float dt) {
     const float dt_s = dt / 1000.f; /* dt arrives in milliseconds */
 
     move_right = key_axis(e, KEK_SCANCODE_D, KEK_SCANCODE_A);
-    move_up = key_axis(e, KEK_SCANCODE_SPACE, KEK_SCANCODE_LSHIFT);
+    move_up = (float)kek_key_held(e, KEK_SCANCODE_SPACE)
+        - (float)(kek_key_held(e, KEK_SCANCODE_LSHIFT)
+                  || kek_key_held(e, KEK_SCANCODE_RSHIFT));
     move_forward = key_axis(e, KEK_SCANCODE_W, KEK_SCANCODE_S);
     yaw = s->camera_yaw;
 

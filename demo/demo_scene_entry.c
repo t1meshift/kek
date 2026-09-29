@@ -24,6 +24,20 @@ static const KEK_FVec3 DEMO_MODEL_POSITION = { 1.5f, -1.f, 4.5f };
 static const KEK_FVec3 DEMO_FLOOR_POSITION = {0.f, -2.f, 0.f};
 static const KEK_FVec3 DEMO_MIRROR_POSITION = {-1.f, -0.5f, DEMO_MIRROR_Z};
 
+/* The engine applies Euler rotations in X, Y, Z order. Convert a camera's
+   yaw-then-local-pitch orientation to those angles so pitching still looks
+   up/down after turning sideways. */
+static KEK_FVec3 DEMO_EntryScene_camera_rotation_(float yaw, float pitch) {
+    float cy = cosf(yaw), sy = sinf(yaw);
+    float cp = cosf(pitch), sp = sinf(pitch);
+    float horizontal = sqrtf(cy * cy + sy * sy * sp * sp);
+    return (KEK_FVec3){
+        atan2f(sp, cy * cp),
+        atan2f(sy * cp, horizontal),
+        atan2f(sy * sp, cy)
+    };
+}
+
 /* +1, -1 or 0 when both or neither are held, as one input axis. */
 static float key_axis(const KEK_engine* e, KEK_scancode positive, KEK_scancode negative) {
     return (float)kek_key_held(e, positive) - (float)kek_key_held(e, negative);
@@ -41,6 +55,8 @@ static void DEMO_EntryScene_reset_(DEMO_EntryScene* s) {
         .tag = DEMO_TAG_SCENE_ENTRY
     };
     s->camera = KEK_DEFAULT_CAMERA;
+    s->camera_yaw = 0.f;
+    s->camera_pitch = 0.f;
     s->elapsed = 0.f;
     s->fps_frames = 0;
     s->fps_seconds = 0.f;
@@ -222,7 +238,6 @@ void DEMO_EntryScene_exit(KEK_scene* scene, KEK_engine* e) {
 void DEMO_EntryScene_update(KEK_scene* scene, KEK_engine* e, float dt) {
     DEMO_EntryScene* s = (DEMO_EntryScene*)scene;
     KEK_FVec3 move_vec = {0, 0, 0};
-    KEK_FVec3 rotate_vec = {0, 0, 0};
     float move_right;
     float move_up;
     float move_forward;
@@ -237,7 +252,7 @@ void DEMO_EntryScene_update(KEK_scene* scene, KEK_engine* e, float dt) {
     move_right = key_axis(e, KEK_SCANCODE_D, KEK_SCANCODE_A);
     move_up = key_axis(e, KEK_SCANCODE_SPACE, KEK_SCANCODE_LSHIFT);
     move_forward = key_axis(e, KEK_SCANCODE_W, KEK_SCANCODE_S);
-    yaw = s->camera.rotation.y;
+    yaw = s->camera_yaw;
 
     forward = (KEK_FVec3) {
         .x = -sinf(yaw),
@@ -257,11 +272,19 @@ void DEMO_EntryScene_update(KEK_scene* scene, KEK_engine* e, float dt) {
     kek_mul_fvec3_n(&move_vec, move_speed * dt_s);
     kek_add_fvec3(&s->camera.position, &move_vec);
 
-    rotate_vec.x = key_axis(e, KEK_SCANCODE_UP, KEK_SCANCODE_DOWN);
-    rotate_vec.y = key_axis(e, KEK_SCANCODE_LEFT, KEK_SCANCODE_RIGHT);
-    kek_normalize_fvec3(&rotate_vec);
-    kek_mul_fvec3_n(&rotate_vec, rotate_speed * dt_s);
-    kek_add_fvec3(&s->camera.rotation, &rotate_vec);
+    {
+        KEK_FVec3 turn = {
+            key_axis(e, KEK_SCANCODE_UP, KEK_SCANCODE_DOWN),
+            key_axis(e, KEK_SCANCODE_LEFT, KEK_SCANCODE_RIGHT),
+            0.f
+        };
+        kek_normalize_fvec3(&turn);
+        s->camera_yaw += turn.y * rotate_speed * dt_s;
+        s->camera_pitch += turn.x * rotate_speed * dt_s;
+    }
+    if (s->camera_pitch > 1.55f) s->camera_pitch = 1.55f;
+    if (s->camera_pitch < -1.55f) s->camera_pitch = -1.55f;
+    s->camera.rotation = DEMO_EntryScene_camera_rotation_(s->camera_yaw, s->camera_pitch);
 
     s->elapsed += dt_s;
 
@@ -293,9 +316,8 @@ void DEMO_EntryScene_render(KEK_scene* scene, KEK_engine* e) {
     if (mdl && mirror && s->camera.position.z < DEMO_MIRROR_Z - 0.1f
         && kek_target_bind(e, s->mirror_texture, KEK_TARGET_CLEAR_COLOR)) {
         reflected.position.z = 2.f * DEMO_MIRROR_Z - s->camera.position.z;
-        reflected.rotation.y = 3.14159265f - s->camera.rotation.y;
-        reflected.rotation.z = -s->camera.rotation.z;
-        /* Match the reflection backdrop to the fog colour. */
+        reflected.rotation = DEMO_EntryScene_camera_rotation_(
+            3.14159265f - s->camera_yaw, s->camera_pitch);
         kek_2d_rect(e, (KEK_IVec2){0, 0},
                     (KEK_IVec2){DEMO_MIRROR_SIZE, DEMO_MIRROR_SIZE}, DEMO_SKY_COLOR);
         DEMO_EntryScene_draw_floor_(s, e, &reflected);

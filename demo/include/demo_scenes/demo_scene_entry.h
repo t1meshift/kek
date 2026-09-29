@@ -10,6 +10,8 @@
 typedef struct DEMO_EntryScene {
     KEK_scene base;
     KEK_camera camera;
+    float camera_yaw;
+    float camera_pitch;
     KEK_ModelHandle model;
     KEK_TextureHandle texture;
     KEK_ModelHandle floor_model;

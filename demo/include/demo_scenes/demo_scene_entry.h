@@ -12,6 +12,7 @@ typedef struct DEMO_EntryScene {
     KEK_camera camera;
     KEK_ModelHandle model;
     KEK_TextureHandle texture;
+    KEK_ModelHandle floor_model;
     KEK_ModelHandle mirror_model;
     KEK_ModelHandle mirror_frame_model;
     KEK_TextureHandle mirror_texture;

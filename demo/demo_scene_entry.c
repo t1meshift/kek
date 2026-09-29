@@ -15,10 +15,13 @@
 #define DEMO_MIRROR_Z 6.f
 #define DEMO_MIRROR_SIZE 128u
 #define DEMO_SKY_COLOR 77u
+#define DEMO_FLOOR_SIZE 50.f
+#define DEMO_FLOOR_TILE 10.f
 #define DEMO_FOG_START 15.f
 #define DEMO_FOG_END 45.f
 
 static const KEK_FVec3 DEMO_MODEL_POSITION = { 1.5f, -1.f, 4.5f };
+static const KEK_FVec3 DEMO_FLOOR_POSITION = {0.f, -2.f, 0.f};
 static const KEK_FVec3 DEMO_MIRROR_POSITION = {-1.f, -0.5f, DEMO_MIRROR_Z};
 
 /* +1, -1 or 0 when both or neither are held, as one input axis. */
@@ -44,6 +47,7 @@ static void DEMO_EntryScene_reset_(DEMO_EntryScene* s) {
     s->fps = 0.f;
     s->model = KEK_MODEL_HANDLE_INVALID;
     s->texture = KEK_TEXTURE_HANDLE_INVALID;
+    s->floor_model = KEK_MODEL_HANDLE_INVALID;
     s->mirror_model = KEK_MODEL_HANDLE_INVALID;
     s->mirror_frame_model = KEK_MODEL_HANDLE_INVALID;
     s->mirror_texture = KEK_TEXTURE_HANDLE_INVALID;
@@ -85,6 +89,45 @@ void DEMO_EntryScene_load_assets_(DEMO_EntryScene* s, KEK_engine* e) {
         return;
     }
 } 
+
+/* One upward-facing quad; UVs repeat the built-in brick texture every ten
+   world units without adding more geometry. */
+static void DEMO_EntryScene_make_floor_(DEMO_EntryScene* s, KEK_engine* e) {
+    const float half = DEMO_FLOOR_SIZE * 0.5f;
+    const float tiles = DEMO_FLOOR_SIZE / DEMO_FLOOR_TILE;
+    const KEK_FVec3 positions[4] = {
+        {-half, 0.f, -half}, {-half, 0.f, half},
+        {half, 0.f, half}, {half, 0.f, -half}
+    };
+    KEK_model* floor;
+
+    s->floor_model = kek_model_create(e, 4, 2, 4, KEK_MODEL_FACE_UVS);
+    floor = kek_model_get(e, s->floor_model);
+    if (!floor) {
+        return;
+    }
+    kek_model_quantise(floor, positions);
+    floor->faces[0] = (KEK_model_face){0, 1, 2};
+    floor->faces[1] = (KEK_model_face){0, 2, 3};
+    floor->uvs[0] = (KEK_FVec2){0.f, 0.f};
+    floor->uvs[1] = (KEK_FVec2){0.f, tiles};
+    floor->uvs[2] = (KEK_FVec2){tiles, tiles};
+    floor->uvs[3] = (KEK_FVec2){tiles, 0.f};
+    floor->face_uvs[0] = (KEK_model_face_uv){0, 1, 2};
+    floor->face_uvs[1] = (KEK_model_face_uv){0, 2, 3};
+    floor->texture = kek_default_texture_handle(e);
+}
+
+static void DEMO_EntryScene_draw_floor_(DEMO_EntryScene* s, KEK_engine* e, KEK_camera* camera) {
+    KEK_model* floor = kek_model_get(e, s->floor_model);
+    if (floor) {
+        KEK_TextureWarpMode warp = kek_texture_get_warp_mode(e);
+        kek_texture_set_warp_mode(e, KEK_TEXTURE_WARP_REPEAT);
+        kek_3d_draw_model(e, floor, camera, DEMO_FLOOR_POSITION,
+                          (KEK_FVec3){0.f, 0.f, 0.f});
+        kek_texture_set_warp_mode(e, warp);
+    }
+}
 
 /* A front-facing square. U is reversed because the camera behind the mirror
    looks toward -z, reversing its screen's horizontal axis. */
@@ -138,11 +181,13 @@ void DEMO_EntryScene_enter(KEK_scene* scene, KEK_engine* e) {
     DEMO_EntryScene* s = (DEMO_EntryScene*)scene;
     DEMO_EntryScene_reset_(s);
     kek_texture_set_warp_mode(e, KEK_TEXTURE_WARP_CLAMP);
-    /* Keep the nearby cat clear; distant geometry fades into the sky. */
+    /* Keep the nearby cat and most of the 50-unit floor clear; distant
+       geometry still fades into the sky when the camera moves away. */
     kek_3d_set_fog(e, DEMO_FOG_START, DEMO_FOG_END);
     kek_3d_set_fog_color(e, DEMO_SKY_COLOR);
 
     DEMO_EntryScene_load_assets_(s, e);
+    DEMO_EntryScene_make_floor_(s, e);
     DEMO_EntryScene_make_mirror_(s, e);
 }
 
@@ -153,6 +198,9 @@ void DEMO_EntryScene_exit(KEK_scene* scene, KEK_engine* e) {
     }
     if (s->texture != KEK_TEXTURE_HANDLE_INVALID) {
         kek_texture_destroy(e, s->texture);
+    }
+    if (s->floor_model != KEK_MODEL_HANDLE_INVALID) {
+        kek_model_destroy(e, s->floor_model);
     }
     if (s->mirror_model != KEK_MODEL_HANDLE_INVALID) {
         kek_model_destroy(e, s->mirror_model);
@@ -165,6 +213,7 @@ void DEMO_EntryScene_exit(KEK_scene* scene, KEK_engine* e) {
     }
     s->model = KEK_MODEL_HANDLE_INVALID;
     s->texture = KEK_TEXTURE_HANDLE_INVALID;
+    s->floor_model = KEK_MODEL_HANDLE_INVALID;
     s->mirror_model = KEK_MODEL_HANDLE_INVALID;
     s->mirror_frame_model = KEK_MODEL_HANDLE_INVALID;
     s->mirror_texture = KEK_TEXTURE_HANDLE_INVALID;
@@ -249,11 +298,14 @@ void DEMO_EntryScene_render(KEK_scene* scene, KEK_engine* e) {
         /* Match the reflection backdrop to the fog colour. */
         kek_2d_rect(e, (KEK_IVec2){0, 0},
                     (KEK_IVec2){DEMO_MIRROR_SIZE, DEMO_MIRROR_SIZE}, DEMO_SKY_COLOR);
+        DEMO_EntryScene_draw_floor_(s, e, &reflected);
         kek_3d_draw_model(e, mdl, &reflected, DEMO_MODEL_POSITION,
                           (KEK_FVec3){0.f, rotate, 0.f});
         kek_target_restore(e);
         mirror_ready = 1;
     }
+
+    DEMO_EntryScene_draw_floor_(s, e, &s->camera);
 
     for (int i = 0; i < 16; ++i) {
         char kal[8] = {0,};
